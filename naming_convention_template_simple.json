@@ -1,0 +1,4 @@
+{
+  "pattern": "{projekt}_{gebaeude}_{autor}_{phase}_{typ}_{verortung}_{disziplin}-{bkp}-{nummerierung}_{freitext}",
+  "segment_lengths": [5, 1, 2, 2, 3, 4, 2, 4, 4, 26]
+}

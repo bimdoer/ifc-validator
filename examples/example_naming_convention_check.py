@@ -33,8 +33,11 @@ def main():
     GENERATE_PDF = True
     PRINT_TEXT_REPORT = True
     
-    # Pfad zur JSON-Konfigurationsdatei
-    CONFIG_FILE = "naming_convention_template.json"
+    # Template-Auswahl:
+    # - "full" oder "naming_convention_template.json" für vollständiges Template mit allowed_values
+    # - "simple" oder "naming_convention_template_simple.json" für einfaches Template nur mit Strukturprüfung
+    # - Oder direkter Pfad zu einer JSON-Datei
+    TEMPLATE = "full"  # Optionen: "full", "simple", oder Dateiname wie "naming_convention_template.json"
     
     # Ordner mit IFC-Dateien zum Prüfen (oder einzelne Dateien)
     IFC_DIRECTORY = "tests/fixtures"  # Oder: ["tests/fixtures/sample.ifc", "tests/fixtures/sample2.ifc"]
@@ -45,16 +48,33 @@ def main():
     
     project_root = Path(__file__).parent.parent
     
+    # Bestimme Template-Datei basierend auf TEMPLATE-Einstellung
+    if TEMPLATE.lower() == "full":
+        config_file = "naming_convention_template.json"
+    elif TEMPLATE.lower() == "simple":
+        config_file = "naming_convention_template_simple.json"
+    else:
+        # Direkter Dateiname oder Pfad
+        config_file = TEMPLATE
+    
     # Lade Konfiguration
-    config_path = project_root / CONFIG_FILE
+    config_path = project_root / config_file
     if not config_path.exists():
         print(f"[FEHLER] Konfigurationsdatei nicht gefunden: {config_path}")
-        print(f"  Erstelle eine JSON-Datei basierend auf naming_convention_template.json")
+        print(f"  Verfügbare Templates:")
+        print(f"    - naming_convention_template.json (vollständig mit allowed_values)")
+        print(f"    - naming_convention_template_simple.json (einfach, nur Strukturprüfung)")
+        print(f"  Setze TEMPLATE auf 'full', 'simple' oder einen Dateinamen")
         return
     
-    print_progress(10, "Konfiguration wird geladen...")
+    print_progress(10, f"Konfiguration wird geladen ({config_file})...")
     try:
         config = load_naming_convention_config(config_path)
+        print(f"[INFO] Template geladen: {config_file}")
+        if config.get('allowed_values'):
+            print(f"[INFO] Template enthält {len(config['allowed_values'])} erlaubte Wert-Definitionen")
+        else:
+            print(f"[INFO] Template enthält nur Strukturprüfung (keine allowed_values)")
     except Exception as e:
         print(f"[FEHLER] Fehler beim Laden der Konfiguration: {e}")
         return
@@ -95,15 +115,19 @@ def main():
     )
     validator.add_rule(structure_rule)
     
-    # Werteprüfungsregel (nur wenn allowed_values vorhanden)
-    if config.get('allowed_values'):
+    # Werteprüfungsregel (nur wenn allowed_values vorhanden und nicht leer)
+    allowed_values = config.get('allowed_values', {})
+    if allowed_values:
+        print(f"[INFO] Werteprüfung wird aktiviert ({len(allowed_values)} Segmente mit erlaubten Werten)")
         value_rule = FileNameValueRule(
             file_names=file_names,
             pattern=config['pattern'],
             segment_lengths=config['segment_lengths'],
-            allowed_values=config['allowed_values']
+            allowed_values=allowed_values
         )
         validator.add_rule(value_rule)
+    else:
+        print(f"[INFO] Nur Strukturprüfung aktiviert (keine Werteprüfung)")
     
     # Validierung durchführen
     # Die Regeln prüfen nur Dateinamen, nicht IFC-Inhalt
