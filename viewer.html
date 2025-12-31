@@ -170,6 +170,11 @@
         let ifcApi;
         let currentModel;
         let isInitialized = false;
+        
+        // Selektion
+        let selectedMesh = null;
+        let raycaster = new THREE.Raycaster();
+        let mouse = new THREE.Vector2();
 
         // Initialisierung
         async function init() {
@@ -240,6 +245,13 @@
                 controls.zoomToCursor = true;
                 controls.update();
 
+                // Maus-Buttons neu zuordnen: Mitte = Pan, Rechts = Zoom
+                controls.mouseButtons = {
+                    LEFT: THREE.MOUSE.ROTATE,
+                    MIDDLE: THREE.MOUSE.PAN,    // ← Mitte = Schieben
+                    RIGHT: THREE.MOUSE.DOLLY     // ← Rechts = Zoom
+                };
+
                 // Initialize IFC API
                 const WebIFC = window.WebIFC;
                 
@@ -294,6 +306,12 @@
                 // File Input Handler
                 document.getElementById('file-input').addEventListener('change', handleFileLoad);
 
+                // Click-Handler für Selektion
+                renderer.domElement.addEventListener('dblclick', onMouseClick);
+                
+                // Hover-Effekt für Cursor
+                renderer.domElement.addEventListener('mousemove', onMouseMove);
+
                 // Animation Loop
                 animate();
 
@@ -322,6 +340,137 @@
             if (controls) controls.update();
             if (renderer && scene && camera) {
                 renderer.render(scene, camera);
+            }
+        }
+
+        // Click-Handler für Element-Selektion
+        function onMouseClick(event) {
+            // Verhindere Selektion während OrbitControls aktiv ist (nur bei Linksklick)
+            if (event.button !== 0) return;
+            
+            // Berechne Mausposition im normalisierten Device Coordinates (-1 bis +1)
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            // Raycasting
+            raycaster.setFromCamera(mouse, camera);
+            
+            // Finde alle getroffenen Objekte (nur Meshes, keine Helper)
+            const meshes = [];
+            scene.traverse((child) => {
+                if (child instanceof THREE.Mesh && child !== selectedMesh) {
+                    meshes.push(child);
+                }
+            });
+            
+            const intersects = raycaster.intersectObjects(meshes, true);
+            
+            if (intersects.length > 0) {
+                // Wähle das erste getroffene Mesh
+                const clickedMesh = intersects[0].object;
+                
+                // Deselektiere vorheriges Element
+                deselectElement();
+                
+                // Selektiere neues Element
+                selectElement(clickedMesh);
+                
+                // Zeige IFC-Informationen
+                showElementInfo(clickedMesh);
+            } else {
+                // Klick ins Leere = Deselektion
+                deselectElement();
+            }
+        }
+
+        // Hover-Effekt für Cursor
+        function onMouseMove(event) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+            
+            raycaster.setFromCamera(mouse, camera);
+            
+            const meshes = [];
+            scene.traverse((child) => {
+                if (child instanceof THREE.Mesh && child !== selectedMesh) {
+                    meshes.push(child);
+                }
+            });
+            
+            const intersects = raycaster.intersectObjects(meshes, true);
+            renderer.domElement.style.cursor = intersects.length > 0 ? 'pointer' : 'default';
+        }
+
+        // Element selektieren und hervorheben
+        function selectElement(mesh) {
+            selectedMesh = mesh;
+            
+            // Speichere Original-Material
+            if (!mesh.userData.originalMaterial) {
+                mesh.userData.originalMaterial = mesh.material.clone();
+            }
+            
+            // Erstelle Highlight-Material
+            const highlightMaterial = new THREE.MeshPhongMaterial({
+                color: 0xff0000, // Rot für Selektion
+                emissive: 0x440000, // Leichtes Leuchten
+                transparent: true,
+                opacity: 0.8,
+                side: THREE.DoubleSide
+            });
+            
+            mesh.material = highlightMaterial;
+        }
+
+        // Element deselektieren
+        function deselectElement() {
+            if (selectedMesh && selectedMesh.userData.originalMaterial) {
+                selectedMesh.material.dispose(); // Altes Highlight-Material löschen
+                selectedMesh.material = selectedMesh.userData.originalMaterial;
+                selectedMesh.userData.originalMaterial = null;
+            }
+            selectedMesh = null;
+            hideElementInfo();
+        }
+
+        // IFC-Informationen anzeigen
+        function showElementInfo(mesh) {
+            // Extrahiere IFC-Daten aus userData
+            const expressID = mesh.userData.expressID;
+            const globalId = mesh.userData.globalId;
+            const ifcType = mesh.userData.ifcType;
+            
+            // Zeige Info in Status-Div
+            let info = 'Selektiert: ';
+            if (ifcType) {
+                info += ifcType;
+            } else {
+                info += 'Element';
+            }
+            if (expressID) {
+                info += ` (ID: ${expressID})`;
+            }
+            if (globalId) {
+                info += ` [${globalId}]`;
+            }
+            
+            updateStatus(info, 'success');
+            
+            console.log('Selektiertes Element:', {
+                expressID,
+                globalId,
+                ifcType,
+                mesh
+            });
+        }
+
+        function hideElementInfo() {
+            if (currentModel) {
+                updateStatus('Bereit - Element doppelklicken zum Selektieren', 'success');
+            } else {
+                updateStatus('Bereit - IFC-Datei auswählen', 'success');
             }
         }
 
@@ -423,6 +572,36 @@
                         // Create mesh
                         const mesh3js = new THREE.Mesh(geometry, material);
 
+                        // IFC-Daten speichern für Selektion
+                        mesh3js.userData.expressID = mesh.expressID;
+                        mesh3js.userData.modelID = modelID;
+                        
+                        // Optional: IFC-Typ abrufen
+                        try {
+                            const ifcLine = ifcApi.GetLine(modelID, mesh.expressID);
+                            if (ifcLine) {
+                                const typeCode = ifcLine.type;
+                                // Versuche Typ-Namen zu bekommen
+                                try {
+                                    const typeName = ifcApi.GetNameFromTypeCode(typeCode);
+                                    if (typeName) {
+                                        mesh3js.userData.ifcType = typeName;
+                                    }
+                                } catch (e) {
+                                    // Fallback: TypeCode als String
+                                    mesh3js.userData.ifcType = `TypeCode: ${typeCode}`;
+                                }
+                                
+                                // GlobalId extrahieren (falls vorhanden)
+                                if (ifcLine.GlobalId) {
+                                    mesh3js.userData.globalId = ifcLine.GlobalId.value || ifcLine.GlobalId;
+                                }
+                            }
+                        } catch (e) {
+                            // IFC-Daten konnten nicht abgerufen werden - kein Problem
+                            console.debug('IFC-Daten für Element nicht verfügbar:', e);
+                        }
+
                         // Apply transformation from IFC
                         const matrix = new THREE.Matrix4();
                         matrix.fromArray(placedGeometry.flatTransformation);
@@ -500,6 +679,9 @@
 
         // Modell löschen
         function clearModel() {
+            // Deselektiere Element vor dem Löschen
+            deselectElement();
+            
             if (currentModel && scene) {
                 // Close IFC model if it has a modelID
                 if (currentModel.userData.modelID !== undefined) {
