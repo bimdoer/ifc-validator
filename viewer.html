@@ -266,6 +266,7 @@
             <input type="file" id="file-input" accept=".ifc" />
             <button id="reset-btn" onclick="resetView()" disabled>Reset View</button>
             <button id="clear-btn" onclick="clearModel()" disabled>Modell löschen</button>
+            <button id="projection-btn" onclick="toggleProjection()" disabled>Axonometrie</button>
             <div id="status" class="loading">Bereit zum Laden...</div>
             <div id="progress">
                 <div id="progress-bar"></div>
@@ -311,6 +312,9 @@
         let ifcApi;
         let currentModel;
         let isInitialized = false;
+        
+        // Projektion: false = Perspektive, true = Axonometrie
+        let isOrthographic = false;
         
         // Spatial Index für Storey → Elemente Zuordnung
         let spatialIndex = null;
@@ -466,7 +470,18 @@
                 window.addEventListener('resize', () => {
                     const width = container.clientWidth;
                     const height = container.clientHeight;
+                    
                     camera.aspect = width / height;
+                    
+                    // Für OrthographicCamera die Größe anpassen
+                    if (isOrthographic && camera instanceof THREE.OrthographicCamera) {
+                        const size = (camera.right - camera.left) / 2;
+                        camera.left = -size * (width / height);
+                        camera.right = size * (width / height);
+                        camera.top = size;
+                        camera.bottom = -size;
+                    }
+                    
                     camera.updateProjectionMatrix();
                     renderer.setSize(width, height);
                     
@@ -842,6 +857,7 @@
                 updateStatus(`IFC geladen: ${file.name}`, 'success');
                 document.getElementById('reset-btn').disabled = false;
                 document.getElementById('clear-btn').disabled = false;
+                document.getElementById('projection-btn').disabled = false;
                 
                 // Extrahiere und zeige Hierarchie
                 try {
@@ -885,19 +901,94 @@
                 const size = box.getSize(new THREE.Vector3());
 
                 const maxDim = Math.max(size.x, size.y, size.z);
-                const fov = camera.fov * (Math.PI / 180);
-                const cameraZ = Math.max(Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5, 10);
+                
+                if (camera instanceof THREE.PerspectiveCamera) {
+                    const fov = camera.fov * (Math.PI / 180);
+                    const cameraZ = Math.max(Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5, 10);
 
-                camera.position.set(
-                    center.x + cameraZ * 0.5,
-                    center.y + cameraZ * 0.6,
-                    center.z + cameraZ * 1.8
-                );
+                    camera.position.set(
+                        center.x + cameraZ * 0.5,
+                        center.y + cameraZ * 0.6,
+                        center.z + cameraZ * 1.8
+                    );
+                } else if (camera instanceof THREE.OrthographicCamera) {
+                    // Für Orthographic: Position basierend auf Modellgröße
+                    const cameraZ = Math.max(maxDim * 1.5, 10);
+                    camera.position.set(
+                        center.x + cameraZ * 0.5,
+                        center.y + cameraZ * 0.6,
+                        center.z + cameraZ * 1.8
+                    );
+                    
+                    // Orthographic Größe anpassen
+                    const orthoSize = Math.max(maxDim * 0.8, 10);
+                    const width = window.innerWidth;
+                    const height = window.innerHeight;
+                    camera.left = -orthoSize * (width / height);
+                    camera.right = orthoSize * (width / height);
+                    camera.top = orthoSize;
+                    camera.bottom = -orthoSize;
+                    camera.updateProjectionMatrix();
+                }
+                
                 controls.target.copy(center);
                 camera.lookAt(center);
                 controls.update();
             }
         }
+
+        // Wechsel zwischen Perspektive und Axonometrie
+        function toggleProjection() {
+            if (!camera || !controls) return;
+            
+            const currentPosition = camera.position.clone();
+            const currentTarget = controls.target.clone();
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            
+            // Speichere alte Kamera-Einstellungen
+            const oldCamera = camera;
+            
+            if (isOrthographic) {
+                // Wechsel zu Perspektive
+                camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 10000);
+                isOrthographic = false;
+                document.getElementById('projection-btn').textContent = 'Axonometrie';
+            } else {
+                // Wechsel zu Axonometrie (Orthographic)
+                const size = Math.max(currentPosition.length() * 0.8, 10);
+                camera = new THREE.OrthographicCamera(
+                    -size * (width / height), // left
+                    size * (width / height),  // right
+                    size,                      // top
+                    -size,                     // bottom
+                    0.1,                       // near
+                    10000                      // far
+                );
+                isOrthographic = true;
+                document.getElementById('projection-btn').textContent = 'Perspektive';
+            }
+            
+            // Position und Target wiederherstellen
+            camera.position.copy(currentPosition);
+            controls.target.copy(currentTarget);
+            camera.lookAt(currentTarget);
+            
+            // Controls neu zuweisen
+            controls.object = camera;
+            controls.update();
+            
+            // Alte Kamera entfernen
+            oldCamera.dispose();
+            
+            // Renderer aktualisieren
+            camera.aspect = width / height;
+            camera.updateProjectionMatrix();
+            renderer.setSize(width, height);
+        }
+        
+        // Funktionen für onclick-Attribute global verfügbar machen
+        window.toggleProjection = toggleProjection;
 
         // Modell löschen
         function clearModel() {
@@ -939,6 +1030,7 @@
             document.getElementById('file-input').value = '';
             document.getElementById('reset-btn').disabled = true;
             document.getElementById('clear-btn').disabled = true;
+            document.getElementById('projection-btn').disabled = true;
 
             updateStatus('Modell gelöscht - Neue IFC-Datei auswählen', 'success');
         }
@@ -1987,6 +2079,10 @@
             
             console.log('✅ Typen-Tree erstellt');
         }
+
+        // Funktionen für onclick-Attribute global verfügbar machen
+        window.resetView = resetView;
+        window.clearModel = clearModel;
 
         // Initialisiere beim Laden
         init();
