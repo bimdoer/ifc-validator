@@ -218,6 +218,15 @@
             background: #d5e8f7;
             border-left: 3px solid #3498db;
         }
+        .tree-node-header.filtered {
+            background: #e8f5e9; /* Leicht grün für gefilterte Storeys */
+        }
+        .storey-checkbox {
+            cursor: pointer;
+            width: 16px;
+            height: 16px;
+            accent-color: #3498db;
+        }
         .tree-toggle {
             width: 20px;
             height: 20px;
@@ -318,6 +327,10 @@
         
         // Spatial Index für Storey → Elemente Zuordnung
         let spatialIndex = null;
+        
+        // Storey-Filterung
+        let selectedStoreyIDs = new Set(); // Set von selektierten Storey-ExpressIDs
+        let storeyElementMap = new Map(); // Storey-ID -> Array von Element-ExpressIDs
         
         // Selektion
         let selectedMesh = null;
@@ -524,10 +537,10 @@
             // Raycasting
             raycaster.setFromCamera(mouse, camera);
             
-            // Finde alle getroffenen Objekte (nur Meshes, keine Helper)
+            // Finde alle getroffenen Objekte (nur sichtbare Meshes, keine Helper)
             const meshes = [];
             scene.traverse((child) => {
-                if (child instanceof THREE.Mesh && child !== selectedMesh) {
+                if (child instanceof THREE.Mesh && child !== selectedMesh && child.visible) {
                     meshes.push(child);
                 }
             });
@@ -562,7 +575,7 @@
             
             const meshes = [];
             scene.traverse((child) => {
-                if (child instanceof THREE.Mesh && child !== selectedMesh) {
+                if (child instanceof THREE.Mesh && child !== selectedMesh && child.visible) {
                     meshes.push(child);
                 }
             });
@@ -634,6 +647,40 @@
             selectedMesh = null;
             hideElementInfo();
         }
+
+        // Filtert Modell nach selektierten Storeys
+        function applyStoreyFilter() {
+            if (!currentModel) return;
+            
+            // Wenn keine Storeys selektiert, zeige alles
+            if (selectedStoreyIDs.size === 0) {
+                currentModel.traverse((child) => {
+                    if (child instanceof THREE.Mesh) {
+                        child.visible = true;
+                    }
+                });
+                return;
+            }
+            
+            // Sammle alle Element-IDs der selektierten Storeys
+            const allowedElementIDs = new Set();
+            for (const storeyID of selectedStoreyIDs) {
+                const elementIDs = storeyElementMap.get(storeyID);
+                if (elementIDs) {
+                    elementIDs.forEach(id => allowedElementIDs.add(id));
+                }
+            }
+            
+            // Zeige/Verstecke Meshes basierend auf Zugehörigkeit
+            currentModel.traverse((child) => {
+                if (child instanceof THREE.Mesh && child.userData.expressID) {
+                    child.visible = allowedElementIDs.has(child.userData.expressID);
+                }
+            });
+            
+            console.log(`🔍 Filter angewendet: ${selectedStoreyIDs.size} Storey(s) selektiert, ${allowedElementIDs.size} Elemente sichtbar`);
+        }
+
         // IFC-Informationen anzeigen
         function showElementInfo(mesh) {
             // Extrahiere IFC-Daten aus userData
@@ -1026,6 +1073,10 @@
             
             // Spatial-Index zurücksetzen
             spatialIndex = null;
+            
+            // Storey-Filter zurücksetzen
+            selectedStoreyIDs.clear();
+            storeyElementMap.clear();
             
             document.getElementById('file-input').value = '';
             document.getElementById('reset-btn').disabled = true;
@@ -1466,6 +1517,11 @@
                 const buildingElements = extractElementsInSpatialStructure(modelID, buildingID);
                 const buildingTypes = groupElementsByType(buildingElements);
                 
+                // Speichere Element-IDs für Building in der Map (falls nötig)
+                if (buildingElements.length > 0) {
+                    storeyElementMap.set(buildingID, buildingElements.map(e => e.expressID));
+                }
+                
                 const building = {
                     expressID: buildingID,
                     name: buildingName,
@@ -1495,6 +1551,9 @@
                     const storeyElements = extractElementsInSpatialStructure(modelID, storeyID);
                     const storeyTypes = groupElementsByType(storeyElements);
                     console.log(`📦 Storey ${storeyID} (${finalName}): ${storeyElements.length} Elemente, ${storeyTypes.length} Typen`);
+                    
+                    // Speichere Element-IDs für dieses Storey in der Map
+                    storeyElementMap.set(storeyID, storeyElements.map(e => e.expressID));
                     
                     building.storeys.push({
                         expressID: storeyID,
@@ -1625,9 +1684,11 @@
                                         'storey',
                                         () => {
                                             console.log('Storey selektiert:', storey);
+                                            // Beim Klick auf Header (nicht Checkbox) nur highlighten, nicht Checkbox togglen
                                             highlightElement(storey.globalId);
                                         },
-                                        hasStoreyChildren
+                                        hasStoreyChildren,
+                                        true // showCheckbox = true für Storeys
                                     );
                                     
                                     // Füge Typen und Elemente für Storey hinzu
@@ -1695,12 +1756,42 @@
         }
 
         // Helper: Erstellt einen Tree-Node
-        function createTreeNode(data, type, onClick, hasChildren = true) {
+        function createTreeNode(data, type, onClick, hasChildren = true, showCheckbox = false) {
             const node = document.createElement('div');
             node.className = 'tree-node';
             
             const header = document.createElement('div');
             header.className = 'tree-node-header';
+            
+            // Checkbox hinzufügen wenn showCheckbox = true und expressID vorhanden
+            let checkbox = null;
+            if (showCheckbox && data.expressID) {
+                checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.className = 'storey-checkbox';
+                checkbox.style.marginRight = '8px';
+                checkbox.style.cursor = 'pointer';
+                checkbox.checked = selectedStoreyIDs.has(data.expressID);
+                
+                // Verhindere, dass Checkbox-Klicks den Header-Click auslösen
+                checkbox.addEventListener('click', (e) => {
+                    e.stopPropagation(); // Verhindere onClick des Headers
+                });
+                
+                checkbox.addEventListener('change', (e) => {
+                    e.stopPropagation(); // Verhindere onClick des Headers
+                    if (checkbox.checked) {
+                        selectedStoreyIDs.add(data.expressID);
+                        header.classList.add('filtered');
+                    } else {
+                        selectedStoreyIDs.delete(data.expressID);
+                        header.classList.remove('filtered');
+                    }
+                    applyStoreyFilter(); // Filter anwenden
+                });
+                
+                header.appendChild(checkbox);
+            }
             
             const toggle = document.createElement('span');
             toggle.className = `tree-toggle ${hasChildren ? 'collapsed' : ''}`;
@@ -1761,6 +1852,11 @@
             header.addEventListener('click', (e) => {
                 // Wenn auf Toggle geklickt wurde, wurde es bereits behandelt
                 if (e.target === toggle) return;
+                
+                // Wenn auf Checkbox geklickt wurde, nichts tun (Checkbox behandelt es selbst)
+                if (checkbox && (e.target === checkbox || e.target.closest('.storey-checkbox'))) {
+                    return;
+                }
                 
                 // Toggle expand/collapse wenn auf Header geklickt
                 if (hasChildren) {
