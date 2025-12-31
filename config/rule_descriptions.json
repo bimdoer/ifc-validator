@@ -1,0 +1,110 @@
+{
+  "GeometryValidationRule": {
+    "title": {
+      "de": "Geometrie-Validierung",
+      "en": "Geometry Validation",
+      "fr": "Validation de la géométrie"
+    },
+    "description": {
+      "de": "Prüft auf gültige Geometrien und geschlossene Volumen",
+      "en": "Checks for valid geometries and closed volumes",
+      "fr": "Vérifie les géométries valides et les volumes fermés"
+    }
+  },
+  "BoundingBoxRule": {
+    "title": {
+      "de": "Bounding Box Prüfung",
+      "en": "Bounding Box Check",
+      "fr": "Vérification de la boîte englobante"
+    },
+    "description": {
+      "de": "Validiert die Bounding Boxes aller Elemente",
+      "en": "Validates the bounding boxes of all elements",
+      "fr": "Valide les boîtes englobantes de tous les éléments"
+    }
+  },
+  "HierarchyRule": {
+    "title": {
+      "de": "Hierarchie-Prüfung",
+      "en": "Hierarchy Check",
+      "fr": "Vérification de la hiérarchie"
+    },
+    "description": {
+      "de": "Prüft die korrekte Hierarchie der IFC-Struktur",
+      "en": "Checks the correct hierarchy of the IFC structure",
+      "fr": "Vérifie la hiérarchie correcte de la structure IFC"
+    }
+  },
+  "DuplicateRule": {
+    "title": {
+      "de": "Duplikat-Prüfung",
+      "en": "Duplicate Check",
+      "fr": "Vérification des doublons"
+    },
+    "description": {
+      "de": "Erkennt doppelte Elemente im Modell",
+      "en": "Detects duplicate elements in the model",
+      "fr": "Détecte les éléments en double dans le modèle"
+    }
+  },
+  "FloorHeightRule": {
+    "title": {
+      "de": "Geschosshöhen-Prüfung",
+      "en": "Floor Height Check",
+      "fr": "Vérification des hauteurs d'étage"
+    },
+    "description": {
+      "de": "Prüft die Geschosshöhen auf Konsistenz",
+      "en": "Checks floor heights for consistency",
+      "fr": "Vérifie la cohérence des hauteurs d'étage"
+    }
+  },
+  "RequiredPropertiesRule": {
+    "title": {
+      "de": "Pflichteigenschaften-Prüfung",
+      "en": "Required Properties Check",
+      "fr": "Vérification des propriétés requises"
+    },
+    "description": {
+      "de": "Prüft ob alle erforderlichen Eigenschaften vorhanden sind",
+      "en": "Checks if all required properties are present",
+      "fr": "Vérifie si toutes les propriétés requises sont présentes"
+    }
+  },
+  "FileNameStructureRule": {
+    "title": {
+      "de": "Dateinamen-Struktur-Prüfung",
+      "en": "File Name Structure Check",
+      "fr": "Vérification de la structure du nom de fichier"
+    },
+    "description": {
+      "de": "Prüft die Struktur des Dateinamens",
+      "en": "Checks the file name structure",
+      "fr": "Vérifie la structure du nom de fichier"
+    }
+  },
+  "FileNameValueRule": {
+    "title": {
+      "de": "Dateinamen-Wert-Prüfung",
+      "en": "File Name Value Check",
+      "fr": "Vérification de la valeur du nom de fichier"
+    },
+    "description": {
+      "de": "Prüft die Werte im Dateinamen",
+      "en": "Checks the values in the file name",
+      "fr": "Vérifie les valeurs dans le nom de fichier"
+    }
+  },
+  "MultiFileFloorComparisonRule": {
+    "title": {
+      "de": "Mehrdateien-Geschosshöhen-Vergleich",
+      "en": "Multi-File Floor Height Comparison",
+      "fr": "Comparaison des hauteurs d'étage multi-fichiers"
+    },
+    "description": {
+      "de": "Vergleicht Geschosshöhen zwischen mehreren Modellen",
+      "en": "Compares floor heights between multiple models",
+      "fr": "Compare les hauteurs d'étage entre plusieurs modèles"
+    }
+  }
+}

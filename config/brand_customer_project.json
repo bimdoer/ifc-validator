@@ -1,0 +1,11 @@
+{
+  "customer": {
+    "name": "ipas architekten",
+    "logo_path": "config/logo_customer.png"
+  },
+  "project": {
+    "name": "ZGSO",
+    "logo_path": "config/logo_project.jpg",
+    "project_id": "Flu21"
+  }
+}

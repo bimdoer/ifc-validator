@@ -1,0 +1,274 @@
+---
+title: "IFC Validierungsbericht"
+format:
+  typst-pdf:
+    page-size: a4
+    margin:
+      top: 2cm
+      bottom: 2cm
+      left: 2cm
+      right: 2cm
+---
+
+```{python}
+#| echo: false
+#| warning: false
+
+import json
+from pathlib import Path
+
+# Lade report_data.json
+report_data_path = Path("report_data.json")
+if not report_data_path.exists():
+    # Versuche im gleichen Verzeichnis wie QMD
+    report_data_path = Path(__file__).parent / "report_data.json"
+
+with open(report_data_path, 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+# Extrahiere Daten
+metadata = data.get('metadata', {})
+customer = data.get('customer', {})
+project = data.get('project', {})
+author = data.get('author', {})
+models = data.get('models', [])
+checks = data.get('checks', [])
+language = data.get('language', 'de')
+
+# Übersetzungen
+translations = {
+    'de': {
+        'dashboard': 'Übersicht',
+        'details': 'Detailprüfungen',
+        'customer': 'Kunde',
+        'project': 'Projekt',
+        'generated_at': 'Erstellt am',
+        'report_id': 'Bericht-ID',
+        'models_checked': 'Geprüfte Modelle',
+        'check': 'Prüfung',
+        'status': 'Status',
+        'findings': 'Befunde',
+        'pass': 'OK',
+        'warn': 'Warnung',
+        'fail': 'Fehler',
+        'total': 'Gesamt',
+        'severity': 'Schweregrad',
+        'entity': 'Element',
+        'message': 'Meldung',
+        'ifc_type': 'IFC-Typ',
+        'storey': 'Geschoss',
+        'building': 'Gebäude',
+        'no_findings': 'Keine Befunde',
+        'summary': 'Zusammenfassung'
+    },
+    'en': {
+        'dashboard': 'Overview',
+        'details': 'Detailed Checks',
+        'customer': 'Customer',
+        'project': 'Project',
+        'generated_at': 'Generated at',
+        'report_id': 'Report ID',
+        'models_checked': 'Models Checked',
+        'check': 'Check',
+        'status': 'Status',
+        'findings': 'Findings',
+        'pass': 'OK',
+        'warn': 'Warning',
+        'fail': 'Error',
+        'total': 'Total',
+        'severity': 'Severity',
+        'entity': 'Entity',
+        'message': 'Message',
+        'ifc_type': 'IFC Type',
+        'storey': 'Storey',
+        'building': 'Building',
+        'no_findings': 'No findings',
+        'summary': 'Summary'
+    },
+    'fr': {
+        'dashboard': 'Vue d\'ensemble',
+        'details': 'Vérifications détaillées',
+        'customer': 'Client',
+        'project': 'Projet',
+        'generated_at': 'Généré le',
+        'report_id': 'ID du rapport',
+        'models_checked': 'Modèles vérifiés',
+        'check': 'Vérification',
+        'status': 'Statut',
+        'findings': 'Résultats',
+        'pass': 'OK',
+        'warn': 'Avertissement',
+        'fail': 'Erreur',
+        'total': 'Total',
+        'severity': 'Gravité',
+        'entity': 'Entité',
+        'message': 'Message',
+        'ifc_type': 'Type IFC',
+        'storey': 'Niveau',
+        'building': 'Bâtiment',
+        'no_findings': 'Aucun résultat',
+        'summary': 'Résumé'
+    }
+}
+
+t = translations.get(language, translations['de'])
+
+# Hilfsfunktionen
+def get_status_symbol(status):
+    if status == 'pass':
+        return '✓'
+    elif status == 'warn':
+        return '⚠'
+    elif status == 'fail':
+        return '✗'
+    return '?'
+
+def format_datetime(dt_str):
+    from datetime import datetime
+    try:
+        dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+        return dt.strftime('%d.%m.%Y %H:%M')
+    except:
+        return dt_str
+
+# Generiere Typst-Code als String
+def generate_typst_content():
+    lines = []
+    
+    # Header mit Logos
+    lines.append("#align(center)[")
+    lines.append("  #grid(")
+    lines.append("    columns: 3,")
+    lines.append("    column-gutter: 1cm,")
+    
+    # Customer Logo
+    if customer.get('logo_path'):
+        lines.append(f'    #image("{customer["logo_path"]}", width: 4cm),')
+    else:
+        lines.append('    [],')
+    
+    # Project Logo
+    if project.get('logo_path'):
+        lines.append(f'    #image("{project["logo_path"]}", width: 4cm),')
+    else:
+        lines.append('    [],')
+    
+    # Author Logo
+    if author.get('logo_path'):
+        lines.append(f'    #image("{author["logo_path"]}", width: 4cm)')
+    else:
+        lines.append('    []')
+    
+    lines.append("  )")
+    lines.append("]")
+    lines.append("")
+    lines.append("#v(1cm)")
+    lines.append("")
+    
+    # Titel
+    lines.append("#align(center)[")
+    lines.append('  #text(size: 24pt, weight: "bold")[IFC Validierungsbericht]')
+    lines.append("]")
+    lines.append("")
+    lines.append("#v(0.5cm)")
+    lines.append("")
+    
+    # Metadaten
+    lines.append("#grid(")
+    lines.append("  columns: 2,")
+    lines.append("  column-gutter: 1cm,")
+    lines.append(f'  [#text(weight: "bold")[{t["customer"]}]: {customer.get("name", "N/A")}]')
+    lines.append(f'  [#text(weight: "bold")[{t["generated_at"]}]: {format_datetime(metadata.get("generated_at", ""))}]')
+    lines.append(f'  [#text(weight: "bold")[{t["project"]}]: {project.get("name", "N/A")}]')
+    lines.append(f'  [#text(weight: "bold")[{t["report_id"]}]: {metadata.get("report_id", "N/A")}]')
+    lines.append(")")
+    lines.append("")
+    lines.append("#v(1cm)")
+    lines.append("")
+    
+    # Übersichtstabelle
+    lines.append("#table(")
+    lines.append("  columns: 4,")
+    lines.append("  align: center,")
+    lines.append("  stroke: 1pt,")
+    lines.append(f'  [*{t["check"]}*], [*{t["status"]}*], [*{t["findings"]}*], [*{t["total"]}*],')
+    
+    for check in checks:
+        status_sym = get_status_symbol(check.get('status', ''))
+        total = check.get('summary', {}).get('total', 0)
+        title = check.get('title', '').replace('"', '\\"')
+        lines.append(f'  ("{title}", "{status_sym}", {total}, {total}),')
+    
+    lines.append(")")
+    lines.append("")
+    lines.append("#pagebreak()")
+    lines.append("")
+    
+    # Detailprüfungen
+    for check in checks:
+        title = check.get('title', '').replace('"', '\\"')
+        desc = check.get('description', '').replace('"', '\\"')
+        status = check.get('status', '')
+        status_sym = get_status_symbol(status)
+        summary = check.get('summary', {})
+        scoped_models = ', '.join(check.get('scoped_models', []))
+        findings = check.get('findings', [])
+        
+        lines.append(f'#heading(level: 1)[{title}]')
+        lines.append("")
+        lines.append(f'{desc}')
+        lines.append("")
+        lines.append("#v(0.5cm)")
+        lines.append("")
+        lines.append("#block(")
+        lines.append('  fill: luma(240),')
+        lines.append('  padding: 0.5cm,')
+        lines.append('  radius: 0.2cm')
+        lines.append(")[")
+        lines.append(f'  #text(weight: "bold")[{t["status"]}]: "{status_sym}" {status.upper()}')
+        lines.append("  #linebreak()")
+        lines.append(f'  #text(weight: "bold")[{t["summary"]}]:')
+        lines.append(f'  - {t["pass"]}: {summary.get("pass", 0)}')
+        lines.append(f'  - {t["warn"]}: {summary.get("warn", 0)}')
+        lines.append(f'  - {t["fail"]}: {summary.get("fail", 0)}')
+        lines.append(f'  - Info: {summary.get("info", 0)}')
+        lines.append("]")
+        lines.append("")
+        lines.append("#v(0.5cm)")
+        lines.append("")
+        lines.append(f'#text(weight: "bold")[{t["models_checked"]}]: {scoped_models}')
+        lines.append("")
+        lines.append("#v(0.5cm)")
+        lines.append("")
+        
+        if findings:
+            lines.append("#table(")
+            lines.append("  columns: (auto, 1fr, auto, auto, auto),")
+            lines.append("  align: left,")
+            lines.append("  stroke: 1pt,")
+            lines.append(f'  [*{t["severity"]}*], [*{t["message"]}*], [*{t["ifc_type"]}*], [*{t["storey"]}*], [*{t["building"]}*],')
+            
+            for finding in findings:
+                severity = finding.get('severity', '').upper()
+                message = finding.get('message', '').replace('"', '\\"')
+                ifc_type = finding.get('ifc_type', '-')
+                storey = finding.get('storey', '-')
+                building = finding.get('building', '-')
+                lines.append(f'  ("{severity}", "{message}", "{ifc_type}", "{storey}", "{building}"),')
+            
+            lines.append(")")
+        else:
+            lines.append(f'#text(style: "italic")[{t["no_findings"]}]')
+        
+        lines.append("")
+        lines.append("#pagebreak()")
+        lines.append("")
+    
+    return '\n'.join(lines)
+
+typst_content = generate_typst_content()
+```
+
+```{=typst}
+`r typst_content`
+```

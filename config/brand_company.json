@@ -1,0 +1,11 @@
+{
+  "company_name": "bimdo GmbH",
+  "logo_path": "config/logo_company.svg",
+  "brand": {
+    "primary_color": "#0066CC",
+    "secondary_color": "#333333",
+    "accent_color": "#FF6600",
+    "font_family": "Arial, sans-serif",
+    "font_heading": "Arial, sans-serif"
+  }
+}

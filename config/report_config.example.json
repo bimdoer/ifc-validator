@@ -1,0 +1,21 @@
+{
+  "brand_company": "config/brand_company.json",
+  "brand_customer_project": "config/brand_customer_project.json",
+  "models": [
+    {
+      "file_path": "C:/Users/manuel/Downloads/08_architecture-model-complex.ifc",
+      "name": "08_architecture-model-complex.ifc",
+      "discipline": "Architecture"
+    }
+  ],
+  "rules": [
+    "GeometryValidationRule",
+    "BoundingBoxRule",
+    "HierarchyRule"
+  ],
+  "language": "de",
+  "output": {
+    "report_id": null,
+    "output_dir": null
+  }
+}
