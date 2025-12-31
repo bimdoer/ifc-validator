@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IFC Viewer - Based on ifc-playground</title>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            height: 100vh;
+            overflow: hidden;
+            background: #1a1a1a;
+        }
+        #viewer-container {
+            width: 100%;
+            height: 100vh;
+            position: relative;
+        }
+        #viewer-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        button:hover:not(:disabled) {
+            background: rgba(0, 0, 0, 0.9);
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #status {
+            padding: 10px 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        #status.loading {
+            color: #4CAF50;
+        }
+        #status.success {
+            color: #4CAF50;
+        }
+        #status.error {
+            color: #f44336;
+        }
+        #progress {
+            display: none;
+            width: 200px;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        #progress-bar {
+            height: 100%;
+            background: #4CAF50;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        label.file-input-label {
+            padding: 10px 20px;
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            display: inline-block;
+            transition: background 0.2s;
+        }
+        label.file-input-label:hover {
+            background: rgba(0, 0, 0, 0.9);
+        }
+    </style>
+</head>
+<body>
+    <div id="viewer-container">
+        <canvas id="viewer-canvas"></canvas>
+        <div id="controls">
+            <label for="file-input" class="file-input-label">IFC-Datei auswählen</label>
+            <input type="file" id="file-input" accept=".ifc" />
+            <button id="reset-btn" onclick="resetView()" disabled>Reset View</button>
+            <button id="clear-btn" onclick="clearModel()" disabled>Modell löschen</button>
+            <div id="status" class="loading">Bereit zum Laden...</div>
+            <div id="progress">
+                <div id="progress-bar"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load web-ifc from CDN (same as ifc-playground) -->
+    <script src="https://unpkg.com/web-ifc@0.0.68/web-ifc-api-iife.js"></script>
+    
+    <!-- Import Map for Three.js modules -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.174.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/"
+        }
+    }
+    </script>
+    
+    <script type="module">
+        // Import Three.js
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // Globale Variablen
+        let scene, camera, renderer, controls;
+        let ifcApi;
+        let currentModel;
+        let isInitialized = false;
+
+        // Initialisierung
+        async function init() {
+            try {
+                updateStatus('Initialisiere IFC-Viewer...', 'loading');
+                
+                // Warte auf web-ifc
+                if (typeof window.WebIFC === 'undefined') {
+                    await new Promise((resolve) => {
+                        const checkInterval = setInterval(() => {
+                            if (typeof window.WebIFC !== 'undefined') {
+                                clearInterval(checkInterval);
+                                resolve();
+                            }
+                        }, 100);
+                    });
+                }
+
+                // Initialisiere Three.js Scene
+                const container = document.getElementById('viewer-canvas');
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x2a3b4c);
+
+                const width = container.clientWidth;
+                const height = container.clientHeight;
+                camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 10000);
+                camera.position.set(15, 15, 15);
+                camera.lookAt(0, 0, 0);
+
+                renderer = new THREE.WebGLRenderer({
+                    antialias: true,
+                    canvas: container,
+                    logarithmicDepthBuffer: true,
+                    preserveDrawingBuffer: true,
+                });
+                renderer.setSize(width, height);
+                renderer.setPixelRatio(window.devicePixelRatio);
+                renderer.shadowMap.enabled = true;
+                renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+                // Lights
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+                scene.add(ambientLight);
+
+                const directionalLight1 = new THREE.DirectionalLight(0xffffff, 1);
+                directionalLight1.position.set(5, 10, 5);
+                scene.add(directionalLight1);
+
+                const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight2.position.set(-5, 8, -5);
+                scene.add(directionalLight2);
+
+                const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x303050, 0.6);
+                scene.add(hemisphereLight);
+
+                // Grid
+                const grid = new THREE.GridHelper(50, 50, 0x0099ff, 0x333366);
+                scene.add(grid);
+
+                // Axes
+                const axesHelper = new THREE.AxesHelper(5);
+                scene.add(axesHelper);
+
+                // Controls
+                controls = new OrbitControls(camera, renderer.domElement);
+                controls.enableDamping = true;
+                controls.dampingFactor = 0.05;
+                controls.update();
+
+                // Initialize IFC API
+                const WebIFC = window.WebIFC;
+                
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/ea0632dd-ba0a-445c-b2e6-1ff6bdab6c1c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'viewer.html:214',message:'WebIFC available check',data:{hasWebIFC:typeof WebIFC!=='undefined',hasIfcAPI:typeof WebIFC!=='undefined'?false:typeof WebIFC.IfcAPI!=='undefined'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+                // #endregion
+                
+                ifcApi = new WebIFC.IfcAPI();
+                
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/ea0632dd-ba0a-445c-b2e6-1ff6bdab6c1c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'viewer.html:220',message:'Before SetWasmPath',data:{wasmPath:'/wasm/web-ifc/',hasSetWasmPath:typeof ifcApi.SetWasmPath!=='undefined'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                // #endregion
+                
+                // Test if WASM file is accessible
+                try {
+                    const wasmTestResponse = await fetch('/wasm/web-ifc/web-ifc.wasm', { method: 'HEAD' });
+                    // #region agent log
+                    fetch('http://127.0.0.1:7243/ingest/ea0632dd-ba0a-445c-b2e6-1ff6bdab6c1c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'viewer.html:225',message:'WASM file accessibility test',data:{status:wasmTestResponse.status,statusText:wasmTestResponse.statusText,ok:wasmTestResponse.ok},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                    // #endregion
+                } catch (fetchError) {
+                    // #region agent log
+                    fetch('http://127.0.0.1:7243/ingest/ea0632dd-ba0a-445c-b2e6-1ff6bdab6c1c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'viewer.html:230',message:'WASM file fetch error',data:{errorMessage:fetchError.message},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+                    // #endregion
+                }
+                
+                // SetWasmPath - use local path like ifc-playground does
+                // The WASM file is hosted locally in public/wasm/web-ifc/
+                ifcApi.SetWasmPath('/wasm/web-ifc/', true);
+                
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/ea0632dd-ba0a-445c-b2e6-1ff6bdab6c1c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'viewer.html:235',message:'After SetWasmPath, before Init',data:{wasmPathSet:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+                // #endregion
+                
+                // Also set worker path if needed
+                if (ifcApi.SetWorkerPath) {
+                    ifcApi.SetWorkerPath('/wasm/web-ifc/', true);
+                }
+                
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/ea0632dd-ba0a-445c-b2e6-1ff6bdab6c1c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'viewer.html:241',message:'Before ifcApi.Init()',data:{hasSetWorkerPath:typeof ifcApi.SetWorkerPath!=='undefined'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+                // #endregion
+                
+                await ifcApi.Init();
+                
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/ea0632dd-ba0a-445c-b2e6-1ff6bdab6c1c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'viewer.html:247',message:'After ifcApi.Init() success',data:{initialized:true},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+                // #endregion
+                
+                isInitialized = true;
+                console.log('✓ IFC API initialisiert');
+
+                // File Input Handler
+                document.getElementById('file-input').addEventListener('change', handleFileLoad);
+
+                // Animation Loop
+                animate();
+
+                // Resize Handler
+                window.addEventListener('resize', () => {
+                    const width = container.clientWidth;
+                    const height = container.clientHeight;
+                    camera.aspect = width / height;
+                    camera.updateProjectionMatrix();
+                    renderer.setSize(width, height);
+                });
+
+                updateStatus('Bereit - IFC-Datei auswählen', 'success');
+            } catch (error) {
+                // #region agent log
+                fetch('http://127.0.0.1:7243/ingest/ea0632dd-ba0a-445c-b2e6-1ff6bdab6c1c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'viewer.html:245',message:'Init error caught',data:{errorMessage:error.message,errorStack:error.stack,errorName:error.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+                // #endregion
+                console.error('Initialisierungsfehler:', error);
+                updateStatus(`Fehler: ${error.message}`, 'error');
+            }
+        }
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+            if (controls) controls.update();
+            if (renderer && scene && camera) {
+                renderer.render(scene, camera);
+            }
+        }
+
+        // Helper function to get BufferGeometry from web-ifc (from ifc-playground)
+        function getBufferGeometry(api, modelID, placedGeometry) {
+            const ifcGeometry = api.GetGeometry(modelID, placedGeometry.geometryExpressID);
+
+            const verts = api.GetVertexArray(
+                ifcGeometry.GetVertexData(),
+                ifcGeometry.GetVertexDataSize()
+            );
+
+            const indices = api.GetIndexArray(
+                ifcGeometry.GetIndexData(),
+                ifcGeometry.GetIndexDataSize()
+            );
+
+            const bufferGeometry = new THREE.BufferGeometry();
+            const posFloats = new Float32Array(verts.length / 2);
+            const normFloats = new Float32Array(verts.length / 2);
+
+            for (let i = 0; i < verts.length; i += 6) {
+                posFloats[i / 2] = verts[i];
+                posFloats[i / 2 + 1] = verts[i + 1];
+                posFloats[i / 2 + 2] = verts[i + 2];
+
+                normFloats[i / 2] = verts[i + 3];
+                normFloats[i / 2 + 1] = verts[i + 4];
+                normFloats[i / 2 + 2] = verts[i + 5];
+            }
+
+            bufferGeometry.setAttribute('position', new THREE.BufferAttribute(posFloats, 3));
+            bufferGeometry.setAttribute('normal', new THREE.BufferAttribute(normFloats, 3));
+            bufferGeometry.setIndex(new THREE.BufferAttribute(indices, 1));
+
+            ifcGeometry.delete();
+            return bufferGeometry;
+        }
+
+        // IFC-Datei laden (basierend auf ifc-playground)
+        async function handleFileLoad(event) {
+            const file = event.target.files[0];
+            if (!file || !isInitialized) return;
+
+            // Altes Modell löschen
+            if (currentModel) {
+                clearModel();
+            }
+
+            updateStatus(`Lade IFC-Datei: ${file.name}...`, 'loading');
+            showProgress(0);
+            document.getElementById('file-input').disabled = true;
+
+            try {
+                const buffer = await file.arrayBuffer();
+                console.log('📦 IFC-Datei geladen:', buffer.byteLength, 'Bytes');
+
+                updateStatus('Parse IFC-Modell...', 'loading');
+                showProgress(50);
+
+                // Open model (wie in ifc-playground)
+                const modelID = ifcApi.OpenModel(new Uint8Array(buffer), {
+                    COORDINATE_TO_ORIGIN: true,
+                    USE_FAST_BOOLS: true,
+                });
+                console.log('✓ IFC-Modell geöffnet, ID:', modelID);
+
+                // Create container for the model
+                const model = new THREE.Group();
+                model.name = file.name;
+                model.userData.modelID = modelID;
+
+                let elementCount = 0;
+                let geometryCount = 0;
+
+                // Stream all meshes (wie in ifc-playground)
+                ifcApi.StreamAllMeshes(modelID, (mesh) => {
+                    // Process each placed geometry
+                    for (let i = 0; i < mesh.geometries.size(); i++) {
+                        const placedGeometry = mesh.geometries.get(i);
+
+                        // Get the geometry
+                        const geometry = getBufferGeometry(ifcApi, modelID, placedGeometry);
+
+                        // Create material
+                        const color = new THREE.Color(
+                            placedGeometry.color.x,
+                            placedGeometry.color.y,
+                            placedGeometry.color.z
+                        );
+
+                        const material = new THREE.MeshPhongMaterial({
+                            color: color,
+                            side: THREE.DoubleSide,
+                            transparent: placedGeometry.color.w !== 1,
+                            opacity: placedGeometry.color.w,
+                        });
+
+                        // Create mesh
+                        const mesh3js = new THREE.Mesh(geometry, material);
+
+                        // Apply transformation from IFC
+                        const matrix = new THREE.Matrix4();
+                        matrix.fromArray(placedGeometry.flatTransformation);
+                        mesh3js.applyMatrix4(matrix);
+
+                        // Add to model
+                        model.add(mesh3js);
+                        geometryCount++;
+                    }
+                    elementCount++;
+                });
+
+                console.log(`✓ ${elementCount} Elemente mit ${geometryCount} Geometrien verarbeitet`);
+
+                // Add model to scene
+                scene.add(model);
+                currentModel = model;
+
+                // Center camera on model
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const fov = camera.fov * (Math.PI / 180);
+                let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5;
+                cameraZ = Math.max(cameraZ, 10);
+
+                camera.position.set(
+                    center.x + cameraZ * 0.5,
+                    center.y + cameraZ * 0.6,
+                    center.z + cameraZ * 1.8
+                );
+
+                controls.target.copy(center);
+                camera.lookAt(center);
+                controls.update();
+
+                console.log('✓ IFC-Modell zur Scene hinzugefügt');
+                console.log('📊 BoundingBox:', { center, size });
+
+                updateStatus(`IFC geladen: ${file.name}`, 'success');
+                document.getElementById('reset-btn').disabled = false;
+                document.getElementById('clear-btn').disabled = false;
+            } catch (error) {
+                console.error('❌ Fehler beim Laden:', error);
+                updateStatus(`Fehler: ${error.message}`, 'error');
+            } finally {
+                document.getElementById('file-input').disabled = false;
+                hideProgress();
+            }
+        }
+
+        // View zurücksetzen
+        function resetView() {
+            if (currentModel && camera && controls) {
+                const box = new THREE.Box3().setFromObject(currentModel);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const fov = camera.fov * (Math.PI / 180);
+                const cameraZ = Math.max(Math.abs(maxDim / 2 / Math.tan(fov / 2)) * 1.5, 10);
+
+                camera.position.set(
+                    center.x + cameraZ * 0.5,
+                    center.y + cameraZ * 0.6,
+                    center.z + cameraZ * 1.8
+                );
+                controls.target.copy(center);
+                camera.lookAt(center);
+                controls.update();
+            }
+        }
+
+        // Modell löschen
+        function clearModel() {
+            if (currentModel && scene) {
+                // Close IFC model if it has a modelID
+                if (currentModel.userData.modelID !== undefined) {
+                    try {
+                        ifcApi.CloseModel(currentModel.userData.modelID);
+                    } catch (e) {
+                        console.warn('Fehler beim Schließen des IFC-Modells:', e);
+                    }
+                }
+
+                // Remove from scene and dispose
+                scene.remove(currentModel);
+                currentModel.traverse((child) => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(m => m.dispose());
+                        } else {
+                            child.material.dispose();
+                        }
+                    }
+                });
+                currentModel = null;
+            }
+
+            document.getElementById('file-input').value = '';
+            document.getElementById('reset-btn').disabled = true;
+            document.getElementById('clear-btn').disabled = true;
+
+            updateStatus('Modell gelöscht - Neue IFC-Datei auswählen', 'success');
+        }
+
+        // Status Update
+        function updateStatus(message, type = 'loading') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = type;
+        }
+
+        // Progress Bar
+        function showProgress(percent) {
+            const progressEl = document.getElementById('progress');
+            const progressBar = document.getElementById('progress-bar');
+            progressEl.style.display = 'block';
+            progressBar.style.width = `${percent}%`;
+        }
+
+        function hideProgress() {
+            const progressEl = document.getElementById('progress');
+            progressEl.style.display = 'none';
+        }
+
+        // Initialisiere beim Laden
+        init();
+    </script>
+</body>
+</html>

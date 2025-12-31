@@ -1,0 +1,17 @@
+{
+  "pattern": "{projekt}_{gebaeude}_{autor}_{phase}_{typ}_{verortung}_{disziplin}-{bkp}-{nummerierung}_{freitext}",
+  "segment_lengths": [5, 1, 2, 2, 3, 4, 2, 4, 4, 26],
+  "allowed_values": {
+    "0": ["XxxYY"],
+    "1": ["A", "B", "C", "U", "0"],
+    "2": ["1", "2", "3", "4"],
+    "3": ["1", "2", "3", "4", "5"],
+    "4": ["1", "2", "3"],
+    "5": ["1", "2", "3", "4"],
+    "6": ["01", "02", "03", "04", "05"],
+    "7": "numeric",
+    "8": "numeric",
+    "9": "numeric"
+  }
+}
+
