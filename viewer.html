@@ -130,6 +130,132 @@
         label.file-input-label:active {
             transform: translateY(0);
         }
+        /* Hierarchie-Panel (unter Controls) */
+        #hierarchy-panel {
+            position: absolute;
+            top: 280px; /* Direkt unter den Controls */
+            left: 20px; /* Gleiche X-Position wie Controls */
+            width: auto; /* Gleiche Breite wie Controls (durch Inhalt bestimmt) */
+            min-width: 220px; /* Gleiche min-width wie Controls */
+            max-height: calc(100vh - 300px);
+            background: white;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 90;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+            border-radius: 8px;
+            padding: 15px; /* Gleiches Padding wie Controls */
+        }
+        #hierarchy-panel.visible {
+            display: flex;
+        }
+        #hierarchy-header {
+            padding: 12px 15px; /* Gleiches Padding wie Buttons (10px vertikal, 15px horizontal) */
+            background: #3498db;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            border-bottom: 2px solid #2980b9;
+            border-radius: 5px; /* Gleicher border-radius wie Buttons */
+            margin: 0; /* Kein negatives Margin mehr */
+            margin-bottom: 10px; /* Abstand zum Content */
+            text-align: center; /* Text zentrieren wie Buttons */
+        }
+        #hierarchy-tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 10px;
+        }
+        .hierarchy-tab {
+            flex: 1;
+            padding: 8px 12px;
+            background: #ecf0f1;
+            color: #2c3e50;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+        .hierarchy-tab:hover {
+            background: #d5dbdb;
+        }
+        .hierarchy-tab.active {
+            background: #3498db;
+            color: white;
+        }
+        #hierarchy-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0; /* Kein zusätzliches Padding, da Panel bereits 15px hat */
+            max-height: calc(100vh - 380px);
+        }
+        .hierarchy-view {
+            display: none;
+        }
+        .hierarchy-view.active {
+            display: block;
+        }
+        /* Tree-View Styling */
+        .tree-node {
+            margin: 5px 0;
+            user-select: none;
+        }
+        .tree-node-header {
+            display: flex;
+            align-items: center;
+            padding: 8px 10px;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        .tree-node-header:hover {
+            background: #ecf0f1;
+        }
+        .tree-node-header.selected {
+            background: #d5e8f7;
+            border-left: 3px solid #3498db;
+        }
+        .tree-toggle {
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 5px;
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        .tree-toggle.expanded::before {
+            content: '▼';
+        }
+        .tree-toggle.collapsed::before {
+            content: '▶';
+        }
+        .tree-icon {
+            width: 20px;
+            height: 20px;
+            margin-right: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+        .tree-label {
+            flex: 1;
+            font-size: 14px;
+            color: #2c3e50;
+        }
+        .tree-children {
+            margin-left: 25px;
+            display: none;
+        }
+        .tree-children.expanded {
+            display: block;
+        }
+        /* Keine Layout-Anpassungen nötig - Panel ist absolut positioniert */
     </style>
 </head>
 <body>
@@ -143,6 +269,21 @@
             <div id="status" class="loading">Bereit zum Laden...</div>
             <div id="progress">
                 <div id="progress-bar"></div>
+            </div>
+        </div>
+        <div id="hierarchy-panel">
+            <div id="hierarchy-header">IFC-Hierarchie</div>
+            <div id="hierarchy-tabs">
+                <button class="hierarchy-tab active" data-view="spatial">Räumlich</button>
+                <button class="hierarchy-tab" data-view="types">Typen</button>
+            </div>
+            <div id="hierarchy-content">
+                <div id="spatial-view" class="hierarchy-view active">
+                    <!-- Räumliche Hierarchie wird hier dynamisch eingefügt -->
+                </div>
+                <div id="types-view" class="hierarchy-view">
+                    <!-- Typen-Hierarchie wird hier dynamisch eingefügt -->
+                </div>
             </div>
         </div>
     </div>
@@ -171,10 +312,16 @@
         let currentModel;
         let isInitialized = false;
         
+        // Spatial Index für Storey → Elemente Zuordnung
+        let spatialIndex = null;
+        
         // Selektion
         let selectedMesh = null;
         let raycaster = new THREE.Raycaster();
         let mouse = new THREE.Vector2();
+        
+        // Hierarchie
+        let hierarchyData = null;
 
         // Initialisierung
         async function init() {
@@ -241,7 +388,7 @@
                 // Controls
                 controls = new OrbitControls(camera, renderer.domElement);
                 controls.enableDamping = true;
-                controls.dampingFactor = 0.05;
+                controls.dampingFactor = 0.5;
                 controls.zoomToCursor = true;
                 controls.update();
 
@@ -322,9 +469,15 @@
                     camera.aspect = width / height;
                     camera.updateProjectionMatrix();
                     renderer.setSize(width, height);
+                    
+                    // Aktualisiere Hierarchie-Panel Breite
+                    updateHierarchyPanelWidth();
                 });
 
                 updateStatus('Bereit - IFC-Datei auswählen', 'success');
+                
+                // Initialisiere Tab-Handler
+                initHierarchyTabs();
             } catch (error) {
                 // #region agent log
                 fetch('http://127.0.0.1:7243/ingest/ea0632dd-ba0a-445c-b2e6-1ff6bdab6c1c',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'viewer.html:245',message:'Init error caught',data:{errorMessage:error.message,errorStack:error.stack,errorName:error.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
@@ -403,38 +556,69 @@
             renderer.domElement.style.cursor = intersects.length > 0 ? 'pointer' : 'default';
         }
 
-        // Element selektieren und hervorheben
         function selectElement(mesh) {
-            selectedMesh = mesh;
+            deselectElement();
             
-            // Speichere Original-Material
-            if (!mesh.userData.originalMaterial) {
-                mesh.userData.originalMaterial = mesh.material.clone();
+            selectedMesh = mesh;
+            const elementExpressID = mesh.userData.expressID;
+            const allElementMeshes = [];
+            
+            if (currentModel) {
+                currentModel.traverse((child) => {
+                    if (child instanceof THREE.Mesh && 
+                        child.userData.expressID === elementExpressID) {
+                        allElementMeshes.push(child);
+                    }
+                });
             }
             
-            // Erstelle Highlight-Material
-            const highlightMaterial = new THREE.MeshPhongMaterial({
-                color: 0xff0000, // Rot für Selektion
-                emissive: 0x440000, // Leichtes Leuchten
-                transparent: true,
-                opacity: 0.8,
-                side: THREE.DoubleSide
-            });
+            // Dimme alle anderen Elemente
+            if (currentModel) {
+                currentModel.traverse((child) => {
+                    if (child instanceof THREE.Mesh && 
+                        child.userData.expressID !== elementExpressID) {
+                        if (!child.userData.originalMaterial) {
+                            child.userData.originalMaterial = child.material.clone();
+                        }
+                        const dimmedMaterial = new THREE.MeshPhongMaterial({
+                            color: 0xd3d3d3,
+                            transparent: true,
+                            opacity: 0.3,
+                            side: THREE.DoubleSide
+                        });
+                        child.material = dimmedMaterial;
+                    }
+                });
+            }
             
-            mesh.material = highlightMaterial;
+            // Highlighte selektiertes Element
+            for (const elementMesh of allElementMeshes) {
+                if (!elementMesh.userData.originalMaterial) {
+                    elementMesh.userData.originalMaterial = elementMesh.material.clone();
+                }
+                const highlightMaterial = new THREE.MeshPhongMaterial({
+                    color: 0x3498db,
+                    transparent: true,
+                    opacity: 0.9,
+                    side: THREE.DoubleSide
+                });
+                elementMesh.material = highlightMaterial;
+            }
         }
 
-        // Element deselektieren
         function deselectElement() {
-            if (selectedMesh && selectedMesh.userData.originalMaterial) {
-                selectedMesh.material.dispose(); // Altes Highlight-Material löschen
-                selectedMesh.material = selectedMesh.userData.originalMaterial;
-                selectedMesh.userData.originalMaterial = null;
+            if (currentModel) {
+                currentModel.traverse((child) => {
+                    if (child instanceof THREE.Mesh && child.userData.originalMaterial) {
+                        child.material.dispose();
+                        child.material = child.userData.originalMaterial;
+                        child.userData.originalMaterial = null;
+                    }
+                });
             }
             selectedMesh = null;
             hideElementInfo();
         }
-
         // IFC-Informationen anzeigen
         function showElementInfo(mesh) {
             // Extrahiere IFC-Daten aus userData
@@ -537,6 +721,13 @@
                     USE_FAST_BOOLS: true,
                 });
                 console.log('✓ IFC-Modell geöffnet, ID:', modelID);
+                
+                // Baue Spatial-Index für Storey → Elemente Zuordnung
+                spatialIndex = buildSpatialIndex(modelID);
+                console.log('✅ Spatial-Index gebaut:', {
+                    structures: spatialIndex.byStructure.size,
+                    mappedElements: spatialIndex.elementToStructure.size
+                });
 
                 // Create container for the model
                 const model = new THREE.Group();
@@ -576,7 +767,7 @@
                         mesh3js.userData.expressID = mesh.expressID;
                         mesh3js.userData.modelID = modelID;
                         
-                        // Optional: IFC-Typ abrufen
+                        // IFC-Typ und Daten abrufen
                         try {
                             const ifcLine = ifcApi.GetLine(modelID, mesh.expressID);
                             if (ifcLine) {
@@ -590,6 +781,11 @@
                                 } catch (e) {
                                     // Fallback: TypeCode als String
                                     mesh3js.userData.ifcType = `TypeCode: ${typeCode}`;
+                                }
+                                
+                                // Name extrahieren (falls vorhanden)
+                                if (ifcLine.Name) {
+                                    mesh3js.userData.name = ifcLine.Name.value || ifcLine.Name || '';
                                 }
                                 
                                 // GlobalId extrahieren (falls vorhanden)
@@ -646,6 +842,32 @@
                 updateStatus(`IFC geladen: ${file.name}`, 'success');
                 document.getElementById('reset-btn').disabled = false;
                 document.getElementById('clear-btn').disabled = false;
+                
+                // Extrahiere und zeige Hierarchie
+                try {
+                    console.log('🔄 Starte Hierarchie-Extraktion...');
+                    hierarchyData = await extractIFCHierarchy(modelID);
+                    console.log('📊 Hierarchie-Daten:', hierarchyData);
+                    
+                    if (hierarchyData && hierarchyData.project) {
+                        console.log('✅ Hierarchie-Daten vorhanden, erstelle Tree...');
+                        buildHierarchyTree(hierarchyData);
+                        
+                        // Extrahiere und zeige Typen-Hierarchie
+                        const typesData = await extractTypesHierarchy(modelID);
+                        if (typesData) {
+                            buildTypesTree(typesData);
+                        }
+                        
+                        showHierarchyPanel();
+                        console.log('✅ Hierarchie-Panel angezeigt');
+                    } else {
+                        console.warn('⚠️ Keine Hierarchie-Daten verfügbar');
+                    }
+                } catch (error) {
+                    console.error('❌ Fehler beim Extrahieren der Hierarchie:', error);
+                    console.error('Stack:', error.stack);
+                }
             } catch (error) {
                 console.error('❌ Fehler beim Laden:', error);
                 updateStatus(`Fehler: ${error.message}`, 'error');
@@ -679,6 +901,10 @@
 
         // Modell löschen
         function clearModel() {
+            // Verstecke Hierarchie-Panel
+            hideHierarchyPanel();
+            hierarchyData = null;
+            
             // Deselektiere Element vor dem Löschen
             deselectElement();
             
@@ -706,7 +932,10 @@
                 });
                 currentModel = null;
             }
-
+            
+            // Spatial-Index zurücksetzen
+            spatialIndex = null;
+            
             document.getElementById('file-input').value = '';
             document.getElementById('reset-btn').disabled = true;
             document.getElementById('clear-btn').disabled = true;
@@ -732,6 +961,1031 @@
         function hideProgress() {
             const progressEl = document.getElementById('progress');
             progressEl.style.display = 'none';
+        }
+
+        // Helper: Konvertiert web-ifc Referenzen (Zahl, {value: Zahl}, Array)
+        function refId(x) {
+            if (x == null) return null;
+            if (typeof x === 'number') return x;
+            if (typeof x === 'object' && 'value' in x) return refId(x.value);
+            return null;
+        }
+        
+        // Helper: Konvertiert web-ifc Referenz-Arrays
+        function refArray(x) {
+            if (!x) return [];
+            const v = (x.value !== undefined) ? x.value : x;
+            if (Array.isArray(v)) return v.map(refId).filter(n => typeof n === 'number');
+            const one = refId(v);
+            return (typeof one === 'number') ? [one] : [];
+        }
+        
+        // Baue Spatial-Index: Storey/Building → Elemente
+        function buildSpatialIndex(modelID) {
+            const relCode = ifcApi.GetTypeCodeFromName('IFCRELCONTAINEDINSPATIALSTRUCTURE');
+            const relIDs = ifcApi.GetLineIDsWithType(modelID, relCode);
+            
+            const byStructure = new Map(); // structureExpressID -> Set(elementExpressID)
+            const elementToStructure = new Map(); // elementExpressID -> structureExpressID
+            
+            for (let i = 0; i < relIDs.size(); i++) {
+                const relID = relIDs.get(i);
+                const rel = ifcApi.GetLine(modelID, relID);
+                
+                const structureID = refId(rel.RelatingStructure);
+                if (typeof structureID !== 'number') continue;
+                
+                const elementIDs = refArray(rel.RelatedElements);
+                
+                let set = byStructure.get(structureID);
+                if (!set) {
+                    set = new Set();
+                    byStructure.set(structureID, set);
+                }
+                
+                for (const eid of elementIDs) {
+                    set.add(eid);
+                    elementToStructure.set(eid, structureID);
+                }
+            }
+            
+            return { byStructure, elementToStructure };
+        }
+        
+        // IFC-Hierarchie extrahieren (verbesserte Version mit Fallbacks)
+        async function extractIFCHierarchy(modelID) {
+            console.log('🔍 Starte Hierarchie-Extraktion für ModelID:', modelID);
+            const hierarchy = {
+                project: null,
+                sites: []
+            };
+            
+            try {
+                // 1. Finde IfcProject
+                const projectTypeCode = ifcApi.GetTypeCodeFromName('IFCPROJECT');
+                const projectIDs = ifcApi.GetLineIDsWithType(modelID, projectTypeCode);
+                
+                if (projectIDs.size() === 0) {
+                    console.warn('⚠️ Kein IfcProject gefunden');
+                    return null;
+                }
+                
+                const projectID = projectIDs.get(0);
+                const projectLine = ifcApi.GetLine(modelID, projectID);
+                
+                const projectName = projectLine.Name?.value || projectLine.Name || 'Projekt';
+                const projectGlobalId = projectLine.GlobalId?.value || projectLine.GlobalId || '';
+                
+                hierarchy.project = {
+                    expressID: projectID,
+                    name: projectName,
+                    globalId: projectGlobalId,
+                    sites: []
+                };
+                
+                // 2. Extrahiere Sites - Versuche mehrere Methoden
+                let sites = extractChildren(modelID, projectID, 'IFCSITE');
+                
+                // Fallback 1: Suche alle Sites direkt
+                if (sites.length === 0) {
+                    console.log('⚠️ Keine Sites über Relationen gefunden, versuche direkte Suche...');
+                    sites = extractAllOfType(modelID, 'IFCSITE');
+                    console.log('📦 Direkte Suche: Gefunden', sites.length, 'Sites');
+                }
+                
+                // Fallback 2: Wenn immer noch keine Sites, versuche über ContainsElements
+                if (sites.length === 0) {
+                    console.log('⚠️ Keine Sites gefunden, versuche über ContainsElements...');
+                    sites = extractViaContainsElements(modelID, projectID, 'IFCSITE');
+                }
+                
+                console.log('🌍 Final: Sites gefunden:', sites.length);
+                
+                // Wenn keine Sites gefunden, erstelle eine Dummy-Site oder suche direkt nach Buildings
+                if (sites.length === 0) {
+                    console.log('⚠️ Keine Sites gefunden, erstelle Dummy-Site oder suche direkt nach Buildings...');
+                    // Versuche direkt Buildings zu finden
+                    let buildings = extractChildren(modelID, projectID, 'IFCBUILDING');
+                    if (buildings.length === 0) {
+                        buildings = extractAllOfType(modelID, 'IFCBUILDING');
+                    }
+                    
+                    if (buildings.length > 0) {
+                        // Erstelle eine Dummy-Site mit den Buildings
+                        const dummySite = {
+                            expressID: -1,
+                            name: 'Site',
+                            globalId: '',
+                            buildings: []
+                        };
+                        
+                        for (const buildingID of buildings) {
+                            const building = await extractBuildingWithStoreys(modelID, buildingID);
+                            if (building) {
+                                dummySite.buildings.push(building);
+                            }
+                        }
+                        
+                        hierarchy.project.sites.push(dummySite);
+                    }
+                } else {
+                    // Normale Verarbeitung: Für jede Site
+                    for (const siteID of sites) {
+                        const site = await extractSiteWithBuildings(modelID, siteID);
+                        if (site) {
+                            hierarchy.project.sites.push(site);
+                        }
+                    }
+                }
+                
+                console.log('✓ IFC-Hierarchie extrahiert:', hierarchy);
+                return hierarchy;
+                
+            } catch (error) {
+                console.error('❌ Fehler beim Extrahieren der Hierarchie:', error);
+                console.error('Stack:', error.stack);
+                return null;
+            }
+        }
+
+        // Helper: Extrahiert Kinder über IsDecomposedBy Relationen
+        function extractChildren(modelID, parentID, childTypeName) {
+            const children = [];
+            
+            try {
+                const parentLine = ifcApi.GetLine(modelID, parentID);
+                const expectedTypeCode = ifcApi.GetTypeCodeFromName(childTypeName);
+                
+                console.log(`🔍 Suche ${childTypeName} (TypeCode: ${expectedTypeCode}) für Parent ${parentID}`);
+                
+                // Prüfe IsDecomposedBy
+                if (parentLine.IsDecomposedBy) {
+                    const relIDs = parentLine.IsDecomposedBy.value || parentLine.IsDecomposedBy;
+                    
+                    // Handle both array and single value
+                    const relIDArray = Array.isArray(relIDs) ? relIDs : (relIDs ? [relIDs] : []);
+                    
+                    console.log(`🔍 Gefunden ${relIDArray.length} IsDecomposedBy Relationen`);
+                    
+                    for (const relID of relIDArray) {
+                        try {
+                            const relLine = ifcApi.GetLine(modelID, relID);
+                            const relTypeCode = relLine.type;
+                            const relTypeName = ifcApi.GetNameFromTypeCode(relTypeCode);
+                            
+                            console.log(`🔍 Relation ${relID}: ${relTypeName} (TypeCode: ${relTypeCode})`);
+                            
+                            const aggregatesTypeCode = ifcApi.GetTypeCodeFromName('IFCRELAGGREGATES');
+                            
+                            // Prüfe ob es eine IfcRelAggregates ist
+                            if (relTypeCode === aggregatesTypeCode) {
+                                console.log(`✅ Relation ${relID} ist IfcRelAggregates`);
+                                
+                                // Hole RelatedObjects
+                                if (relLine.RelatedObjects) {
+                                    const objectIDs = relLine.RelatedObjects.value || relLine.RelatedObjects;
+                                    const objectIDArray = Array.isArray(objectIDs) ? objectIDs : (objectIDs ? [objectIDs] : []);
+                                    
+                                    console.log(`🔍 Gefunden ${objectIDArray.length} RelatedObjects`);
+                                    
+                                    for (const objectID of objectIDArray) {
+                                        try {
+                                            const objectLine = ifcApi.GetLine(modelID, objectID);
+                                            const objectTypeCode = objectLine.type;
+                                            const objectTypeName = ifcApi.GetNameFromTypeCode(objectTypeCode);
+                                            
+                                            console.log(`🔍 Object ${objectID}: ${objectTypeName} (TypeCode: ${objectTypeCode})`);
+                                            
+                                            if (objectTypeCode === expectedTypeCode) {
+                                                console.log(`✅ Object ${objectID} ist ${childTypeName} - hinzugefügt!`);
+                                                children.push(objectID);
+                                            }
+                                        } catch (e) {
+                                            // Ignoriere Fehler bei einzelnen Objekten
+                                            console.debug('Fehler beim Lesen von ObjectID', objectID, ':', e);
+                                        }
+                                    }
+                                } else {
+                                    console.log(`⚠️ Relation ${relID} hat keine RelatedObjects`);
+                                }
+                            } else {
+                                console.log(`⚠️ Relation ${relID} ist nicht IfcRelAggregates, sondern ${relTypeName}`);
+                            }
+                        } catch (e) {
+                            // Ignoriere Fehler bei Relationen
+                            console.debug('Fehler beim Lesen von RelationID', relID, ':', e);
+                        }
+                    }
+                } else {
+                    console.log(`⚠️ Parent ${parentID} hat kein IsDecomposedBy`);
+                }
+                
+                console.log(`✅ Gefunden ${children.length} ${childTypeName} für Parent ${parentID}`);
+            } catch (error) {
+                console.error('❌ Fehler beim Extrahieren von Kindern für Parent', parentID, ':', error);
+            }
+            
+            return children;
+        }
+
+        // Neue Helper-Funktion: Extrahiert alle Objekte eines Typs
+        function extractAllOfType(modelID, typeName) {
+            const objects = [];
+            try {
+                const typeCode = ifcApi.GetTypeCodeFromName(typeName);
+                const objectIDs = ifcApi.GetLineIDsWithType(modelID, typeCode);
+                
+                for (let i = 0; i < objectIDs.size(); i++) {
+                    objects.push(objectIDs.get(i));
+                }
+                
+                console.log(`📦 Gefunden ${objects.length} ${typeName} Objekte (direkte Suche)`);
+            } catch (error) {
+                console.error(`❌ Fehler beim Extrahieren von ${typeName}:`, error);
+            }
+            return objects;
+        }
+
+        // Neue Helper-Funktion: Extrahiert über ContainsElements
+        function extractViaContainsElements(modelID, parentID, childTypeName) {
+            const children = [];
+            try {
+                const parentLine = ifcApi.GetLine(modelID, parentID);
+                const expectedTypeCode = ifcApi.GetTypeCodeFromName(childTypeName);
+                
+                if (parentLine.ContainsElements) {
+                    const relIDs = parentLine.ContainsElements.value || parentLine.ContainsElements;
+                    const relIDArray = Array.isArray(relIDs) ? relIDs : (relIDs ? [relIDs] : []);
+                    
+                    for (const relID of relIDArray) {
+                        try {
+                            const relLine = ifcApi.GetLine(modelID, relID);
+                            if (relLine.RelatedElements) {
+                                const elementIDs = relLine.RelatedElements.value || relLine.RelatedElements;
+                                const elementIDArray = Array.isArray(elementIDs) ? elementIDs : (elementIDs ? [elementIDs] : []);
+                                
+                                for (const elementID of elementIDArray) {
+                                    try {
+                                        const elementLine = ifcApi.GetLine(modelID, elementID);
+                                        if (elementLine.type === expectedTypeCode) {
+                                            children.push(elementID);
+                                        }
+                                    } catch (e) {
+                                        // Ignoriere Fehler
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            // Ignoriere Fehler
+                        }
+                    }
+                }
+            } catch (error) {
+                console.debug('Fehler bei ContainsElements:', error);
+            }
+            return children;
+        }
+
+        // Neue Helper-Funktion: Extrahiert Site mit Buildings
+        async function extractSiteWithBuildings(modelID, siteID) {
+            try {
+                const siteLine = ifcApi.GetLine(modelID, siteID);
+                const siteName = siteLine.Name?.value || siteLine.Name || 'Site';
+                const siteGlobalId = siteLine.GlobalId?.value || siteLine.GlobalId || '';
+                
+                const site = {
+                    expressID: siteID,
+                    name: siteName,
+                    globalId: siteGlobalId,
+                    buildings: []
+                };
+                
+                // Extrahiere Buildings
+                let buildings = extractChildren(modelID, siteID, 'IFCBUILDING');
+                
+                // Fallback: Direkte Suche
+                if (buildings.length === 0) {
+                    buildings = extractAllOfType(modelID, 'IFCBUILDING');
+                }
+                
+                // Für jedes Building
+                for (const buildingID of buildings) {
+                    const building = await extractBuildingWithStoreys(modelID, buildingID);
+                    if (building) {
+                        site.buildings.push(building);
+                    }
+                }
+                
+                return site;
+            } catch (error) {
+                console.error('Fehler beim Extrahieren von Site:', error);
+                return null;
+            }
+        }
+
+        // Helper: Extrahiert Elemente in einer räumlichen Struktur (Storey/Building)
+        // Verwendet den Spatial-Index für zuverlässige Zuordnung
+        function extractElementsInSpatialStructure(modelID, spatialStructureID) {
+            const result = [];
+            if (!spatialIndex?.byStructure) {
+                console.log(`  ⚠️ Kein Spatial-Index verfügbar für Struktur ${spatialStructureID}`);
+                return result;
+            }
+            
+            const set = spatialIndex.byStructure.get(spatialStructureID);
+            if (!set || set.size === 0) {
+                console.log(`  📦 Struktur ${spatialStructureID}: Keine Elemente im Index`);
+                return result;
+            }
+            
+            console.log(`  📦 Struktur ${spatialStructureID}: ${set.size} Elemente im Index`);
+            
+            for (const elementID of set) {
+                try {
+                    const line = ifcApi.GetLine(modelID, elementID);
+                    if (!line) continue;
+                    
+                    const typeName = ifcApi.GetNameFromTypeCode(line.type);
+                    if (!typeName || !typeName.toUpperCase().startsWith('IFC')) continue;
+                    
+                    // Filtere abstrakte Klassen und Type-Objekte
+                    const typeUpper = typeName.toUpperCase();
+                    const abstract = new Set([
+                        'IFCROOT', 'IFCOBJECT', 'IFCOBJECTDEFINITION',
+                        'IFCPRODUCT', 'IFCELEMENT', 'IFCSPATIALSTRUCTUREELEMENT',
+                        'IFCBUILDINGELEMENT', 'IFCDISTRIBUTIONELEMENT', 'IFCFLOWELEMENT'
+                    ]);
+                    if (abstract.has(typeUpper)) continue;
+                    if (typeUpper.includes('TYPEPRODUCT') || typeUpper.includes('TYPEOBJECT')) continue;
+                    
+                    result.push({
+                        expressID: elementID,
+                        name: line.Name?.value || line.Name || `Element ${elementID}`,
+                        globalId: line.GlobalId?.value || line.GlobalId || '',
+                        typeName
+                    });
+                } catch (_) {
+                    // Ignoriere Fehler bei einzelnen Elementen
+                }
+            }
+            
+            console.log(`  ✅ ${result.length} Elemente extrahiert für Struktur ${spatialStructureID}`);
+            return result;
+        }
+        
+        
+        // Helper: Gruppiert Elemente nach IFC-Typ
+        function groupElementsByType(elements) {
+            const typesMap = new Map();
+            
+            for (const element of elements) {
+                const typeName = element.typeName;
+                if (!typesMap.has(typeName)) {
+                    typesMap.set(typeName, []);
+                }
+                typesMap.get(typeName).push(element);
+            }
+            
+            // Konvertiere zu Array und sortiere
+            return Array.from(typesMap.entries())
+                .map(([typeName, elements]) => ({
+                    typeName: typeName,
+                    count: elements.length,
+                    elements: elements.sort((a, b) => {
+                        const nameA = (a.name && typeof a.name === 'string') ? a.name : '';
+                        const nameB = (b.name && typeof b.name === 'string') ? b.name : '';
+                        if (nameA && nameB && nameA !== `Element ${a.expressID}` && nameB !== `Element ${b.expressID}`) {
+                            return nameA.localeCompare(nameB);
+                        }
+                        return a.expressID - b.expressID;
+                    })
+                }))
+                .sort((a, b) => a.typeName.localeCompare(b.typeName));
+        }
+
+        // Neue Helper-Funktion: Extrahiert Building mit Storeys
+        async function extractBuildingWithStoreys(modelID, buildingID) {
+            try {
+                const buildingLine = ifcApi.GetLine(modelID, buildingID);
+                const buildingName = buildingLine.Name?.value || buildingLine.Name || 'Gebäude';
+                const buildingGlobalId = buildingLine.GlobalId?.value || buildingLine.GlobalId || '';
+                
+                // Extrahiere Elemente im Building (direkt, nicht in Storeys)
+                const buildingElements = extractElementsInSpatialStructure(modelID, buildingID);
+                const buildingTypes = groupElementsByType(buildingElements);
+                
+                const building = {
+                    expressID: buildingID,
+                    name: buildingName,
+                    globalId: buildingGlobalId,
+                    storeys: [],
+                    types: buildingTypes // Elemente direkt im Building
+                };
+                
+                // Extrahiere BuildingStoreys
+                let storeys = extractChildren(modelID, buildingID, 'IFCBUILDINGSTOREY');
+                
+                // Fallback: Direkte Suche
+                if (storeys.length === 0) {
+                    storeys = extractAllOfType(modelID, 'IFCBUILDINGSTOREY');
+                }
+                
+                // Für jedes Storey
+                for (const storeyID of storeys) {
+                    const storeyLine = ifcApi.GetLine(modelID, storeyID);
+                    const storeyName = storeyLine.Name?.value || storeyLine.Name || '';
+                    const elevation = storeyLine.Elevation?.value || storeyLine.Elevation || 0;
+                    const storeyGlobalId = storeyLine.GlobalId?.value || storeyLine.GlobalId || '';
+                    
+                    const finalName = storeyName || `Geschoss (${parseFloat(elevation).toFixed(2)}m)`;
+                    
+                    // Extrahiere Elemente im Storey
+                    const storeyElements = extractElementsInSpatialStructure(modelID, storeyID);
+                    const storeyTypes = groupElementsByType(storeyElements);
+                    console.log(`📦 Storey ${storeyID} (${finalName}): ${storeyElements.length} Elemente, ${storeyTypes.length} Typen`);
+                    
+                    building.storeys.push({
+                        expressID: storeyID,
+                        name: finalName,
+                        globalId: storeyGlobalId,
+                        elevation: parseFloat(elevation),
+                        types: storeyTypes // Elemente im Storey, gruppiert nach Typ
+                    });
+                }
+                
+                // Sortiere Storeys nach Elevation
+                building.storeys.sort((a, b) => a.elevation - b.elevation);
+                
+                return building;
+            } catch (error) {
+                console.error('Fehler beim Extrahieren von Building:', error);
+                return null;
+            }
+        }
+
+        // Tree-View erstellen (Räumliche Hierarchie)
+        function buildHierarchyTree(hierarchy) {
+            const container = document.getElementById('spatial-view');
+            container.innerHTML = '';
+            
+            if (!hierarchy || !hierarchy.project) {
+                container.innerHTML = '<div style="padding: 20px; color: #7f8c8d;">Keine Hierarchie verfügbar</div>';
+                return;
+            }
+            
+            console.log('🌳 Erstelle Tree für:', hierarchy);
+            console.log('🌳 Project Sites:', hierarchy.project.sites.length);
+            
+            const projectNodeData = createTreeNode(
+                hierarchy.project,
+                'project',
+                () => {
+                    console.log('Projekt selektiert:', hierarchy.project);
+                },
+                hierarchy.project.sites.length > 0 // Hat Kinder wenn Sites vorhanden
+            );
+            
+            // Füge Sites hinzu
+            if (hierarchy.project.sites && hierarchy.project.sites.length > 0) {
+                console.log('🌳 Füge', hierarchy.project.sites.length, 'Sites hinzu');
+                for (const site of hierarchy.project.sites) {
+                    const siteNodeData = createTreeNode(
+                        site,
+                        'site',
+                        () => {
+                            console.log('Site selektiert:', site);
+                            highlightElement(site.globalId);
+                        },
+                        site.buildings && site.buildings.length > 0 // Hat Kinder wenn Buildings vorhanden
+                    );
+                    
+                    // Füge Buildings hinzu
+                    if (site.buildings && site.buildings.length > 0) {
+                        console.log('🌳 Füge', site.buildings.length, 'Buildings für Site', site.name, 'hinzu');
+                        for (const building of site.buildings) {
+                            // Building hat Kinder wenn Storeys oder Typen vorhanden
+                            const hasBuildingChildren = (building.storeys && building.storeys.length > 0) || 
+                                                       (building.types && building.types.length > 0);
+                            
+                            const buildingNodeData = createTreeNode(
+                                building,
+                                'building',
+                                () => {
+                                    console.log('Building selektiert:', building);
+                                    highlightElement(building.globalId);
+                                },
+                                hasBuildingChildren
+                            );
+                            
+                            // Füge Elemente direkt im Building hinzu (falls vorhanden)
+                            if (building.types && building.types.length > 0) {
+                                for (const typeGroup of building.types) {
+                                    const typeNodeData = createTreeNode(
+                                        {
+                                            name: `${typeGroup.typeName} (${typeGroup.count})`,
+                                            expressID: null,
+                                            globalId: null
+                                        },
+                                        'type',
+                                        () => {
+                                            console.log('Building-Typ selektiert:', typeGroup.typeName);
+                                        },
+                                        typeGroup.elements.length > 0
+                                    );
+                                    
+                                    // Füge Elemente hinzu
+                                    for (const element of typeGroup.elements) {
+                                        const elementName = (element.name && typeof element.name === 'string' && element.name.trim() !== '') 
+                                            ? element.name 
+                                            : `Element ${element.expressID}`;
+                                        
+                                        const elementNodeData = createTreeNode(
+                                            {
+                                                name: elementName,
+                                                expressID: element.expressID,
+                                                globalId: element.globalId
+                                            },
+                                            'element',
+                                            () => {
+                                                console.log('Building-Element selektiert:', element);
+                                                highlightElement(element.globalId);
+                                            },
+                                            false
+                                        );
+                                        typeNodeData.children.appendChild(elementNodeData.node);
+                                    }
+                                    
+                                    buildingNodeData.children.appendChild(typeNodeData.node);
+                                }
+                            }
+                            
+                            // Füge Storeys hinzu
+                            if (building.storeys && building.storeys.length > 0) {
+                                console.log('🌳 Füge', building.storeys.length, 'Storeys für Building', building.name, 'hinzu');
+                                for (const storey of building.storeys) {
+                                    // Storey hat Kinder wenn es Typen/Elemente gibt
+                                    const hasStoreyChildren = storey.types && storey.types.length > 0;
+                                    
+                                    console.log(`  📦 Storey "${storey.name}": ${storey.types ? storey.types.length : 0} Typen, hasChildren: ${hasStoreyChildren}`);
+                                    
+                                    const storeyNodeData = createTreeNode(
+                                        storey,
+                                        'storey',
+                                        () => {
+                                            console.log('Storey selektiert:', storey);
+                                            highlightElement(storey.globalId);
+                                        },
+                                        hasStoreyChildren
+                                    );
+                                    
+                                    // Füge Typen und Elemente für Storey hinzu
+                                    if (storey.types && storey.types.length > 0) {
+                                        console.log(`    → Füge ${storey.types.length} Typen für Storey "${storey.name}" hinzu`);
+                                        for (const typeGroup of storey.types) {
+                                            console.log(`      → Typ: ${typeGroup.typeName} mit ${typeGroup.elements.length} Elementen`);
+                                            const typeNodeData = createTreeNode(
+                                                {
+                                                    name: `${typeGroup.typeName} (${typeGroup.count})`,
+                                                    expressID: null,
+                                                    globalId: null
+                                                },
+                                                'type',
+                                                () => {
+                                                    console.log('Storey-Typ selektiert:', typeGroup.typeName);
+                                                },
+                                                typeGroup.elements.length > 0
+                                            );
+                                            
+                                            // Füge Elemente hinzu
+                                            for (const element of typeGroup.elements) {
+                                                const elementName = (element.name && typeof element.name === 'string' && element.name.trim() !== '') 
+                                                    ? element.name 
+                                                    : `Element ${element.expressID}`;
+                                                
+                                                const elementNodeData = createTreeNode(
+                                                    {
+                                                        name: elementName,
+                                                        expressID: element.expressID,
+                                                        globalId: element.globalId
+                                                    },
+                                                    'element',
+                                                    () => {
+                                                        console.log('Storey-Element selektiert:', element);
+                                                        highlightElement(element.globalId);
+                                                    },
+                                                    false
+                                                );
+                                                typeNodeData.children.appendChild(elementNodeData.node);
+                                            }
+                                            
+                                            storeyNodeData.children.appendChild(typeNodeData.node);
+                                        }
+                                    } else {
+                                        console.log(`    ⚠️ Storey "${storey.name}" hat keine Typen (storey.types ist ${storey.types ? 'leer' : 'undefined'})`);
+                                    }
+                                    
+                                    buildingNodeData.children.appendChild(storeyNodeData.node);
+                                }
+                            }
+                            
+                            siteNodeData.children.appendChild(buildingNodeData.node);
+                        }
+                    }
+                    
+                    projectNodeData.children.appendChild(siteNodeData.node);
+                }
+            } else {
+                console.warn('⚠️ Keine Sites gefunden für Project');
+            }
+            
+            container.appendChild(projectNodeData.node);
+            console.log('✅ Tree erstellt');
+        }
+
+        // Helper: Erstellt einen Tree-Node
+        function createTreeNode(data, type, onClick, hasChildren = true) {
+            const node = document.createElement('div');
+            node.className = 'tree-node';
+            
+            const header = document.createElement('div');
+            header.className = 'tree-node-header';
+            
+            const toggle = document.createElement('span');
+            toggle.className = `tree-toggle ${hasChildren ? 'collapsed' : ''}`;
+            if (!hasChildren) {
+                toggle.style.visibility = 'hidden';
+            }
+            
+            const icon = document.createElement('span');
+            icon.className = 'tree-icon';
+            const icons = {
+                project: '🏗️',
+                site: '🌍',
+                building: '🏢',
+                storey: '🏠',
+                category: '📁',
+                type: '📦',
+                element: '🔷'
+            };
+            icon.textContent = icons[type] || '📦';
+            
+            const label = document.createElement('span');
+            label.className = 'tree-label';
+            label.textContent = data.name || 'Unbenannt';
+            
+            header.appendChild(toggle);
+            header.appendChild(icon);
+            header.appendChild(label);
+            
+            const children = document.createElement('div');
+            children.className = 'tree-children';
+            
+            node.appendChild(header);
+            node.appendChild(children);
+            
+            // Toggle-Funktion
+            const toggleExpand = (e) => {
+                if (e) e.stopPropagation();
+                if (!hasChildren) return;
+                
+                const isExpanded = toggle.classList.contains('expanded');
+                if (isExpanded) {
+                    toggle.classList.remove('expanded');
+                    toggle.classList.add('collapsed');
+                    children.classList.remove('expanded');
+                } else {
+                    toggle.classList.remove('collapsed');
+                    toggle.classList.add('expanded');
+                    children.classList.add('expanded');
+                }
+            };
+            
+            // Toggle-Button Event
+            if (hasChildren) {
+                toggle.addEventListener('click', toggleExpand);
+            }
+            
+            // Header Click Event
+            header.addEventListener('click', (e) => {
+                // Wenn auf Toggle geklickt wurde, wurde es bereits behandelt
+                if (e.target === toggle) return;
+                
+                // Toggle expand/collapse wenn auf Header geklickt
+                if (hasChildren) {
+                    toggleExpand(e);
+                }
+                
+                // Selektiere Node
+                document.querySelectorAll('.tree-node-header').forEach(h => {
+                    h.classList.remove('selected');
+                });
+                header.classList.add('selected');
+                
+                // Rufe onClick-Handler auf
+                if (onClick) onClick();
+            });
+            
+            // Gib sowohl node als auch children zurück
+            return { node, children };
+        }
+
+        // Helper: Markiert Element im Viewer (über GlobalId)
+        function highlightElement(globalId) {
+            if (!globalId || !currentModel) return;
+            
+            // Deselektiere vorheriges Element
+            deselectElement();
+            
+            // Finde Mesh mit dieser GlobalId
+            let foundMesh = null;
+            currentModel.traverse((child) => {
+                if (child instanceof THREE.Mesh && child.userData.globalId === globalId) {
+                    foundMesh = child;
+                }
+            });
+            
+            if (foundMesh) {
+                selectElement(foundMesh);
+                showElementInfo(foundMesh);
+                
+                // Kamera zum Element fokussieren
+                const box = new THREE.Box3().setFromObject(foundMesh);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                
+                camera.position.set(
+                    center.x + maxDim * 1.5,
+                    center.y + maxDim * 1.5,
+                    center.z + maxDim * 1.5
+                );
+                controls.target.copy(center);
+                camera.lookAt(center);
+                controls.update();
+            }
+        }
+
+        // Panel anzeigen/verstecken
+        function showHierarchyPanel() {
+            const panel = document.getElementById('hierarchy-panel');
+            const controls = document.getElementById('controls');
+            
+            // Übernehme die exakte Breite von #controls
+            if (controls && panel) {
+                const controlsWidth = controls.offsetWidth;
+                panel.style.width = controlsWidth + 'px';
+            }
+            
+            panel.classList.add('visible');
+        }
+
+        function hideHierarchyPanel() {
+            const panel = document.getElementById('hierarchy-panel');
+            panel.classList.remove('visible');
+        }
+        
+        // Aktualisiere Panel-Breite wenn sich Controls-Breite ändert
+        function updateHierarchyPanelWidth() {
+            const panel = document.getElementById('hierarchy-panel');
+            const controls = document.getElementById('controls');
+            
+            if (panel && controls && panel.classList.contains('visible')) {
+                const controlsWidth = controls.offsetWidth;
+                panel.style.width = controlsWidth + 'px';
+            }
+        }
+
+        // Tab-Wechsel Handler
+        function initHierarchyTabs() {
+            const tabs = document.querySelectorAll('.hierarchy-tab');
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const viewName = tab.getAttribute('data-view');
+                    
+                    // Aktiviere Tab
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    
+                    // Zeige entsprechende View
+                    document.querySelectorAll('.hierarchy-view').forEach(view => {
+                        view.classList.remove('active');
+                    });
+                    document.getElementById(viewName + '-view').classList.add('active');
+                });
+            });
+        }
+
+        // Typen-Hierarchie extrahieren (Standard IFC-Struktur: IfcObject Klassen)
+        // Extrahiert Elemente direkt aus dem Modell (nicht Meshes), um Duplikate zu vermeiden
+        async function extractTypesHierarchy(modelID) {
+            console.log('🔍 Starte Typen-Extraktion für ModelID:', modelID);
+            const typesMap = new Map(); // IFC-Klasse -> Elemente
+            const foundExpressIDs = new Set(); // Um Duplikate zu vermeiden
+            
+            try {
+                // Verwende den Spatial-Index, um alle Elemente zu bekommen
+                // Oder extrahiere alle IFC-Produkte direkt aus dem Modell
+                const allElements = new Set();
+                
+                // Methode 1: Sammle alle Elemente aus dem Spatial-Index
+                if (spatialIndex && spatialIndex.elementToStructure) {
+                    for (const elementID of spatialIndex.elementToStructure.keys()) {
+                        allElements.add(elementID);
+                    }
+                }
+                
+                // Methode 2: Falls Spatial-Index nicht verfügbar, durchsuche alle IFC-Produkte
+                if (allElements.size === 0) {
+                    console.log('  📦 Spatial-Index nicht verfügbar, suche alle IFC-Produkte...');
+                    const productTypeCode = ifcApi.GetTypeCodeFromName('IFCPRODUCT');
+                    const productIDs = ifcApi.GetLineIDsWithType(modelID, productTypeCode);
+                    
+                    for (let i = 0; i < productIDs.size(); i++) {
+                        allElements.add(productIDs.get(i));
+                    }
+                }
+                
+                console.log('📦 Gefunden', allElements.size, 'Elemente im Modell');
+                
+                let skippedReasons = {
+                    noElementLine: 0,
+                    noTypeName: 0,
+                    notIFC: 0,
+                    abstract: 0,
+                    typeObject: 0,
+                    error: 0
+                };
+                
+                // Extrahiere für jedes Element die IFC-Klasse
+                for (const elementID of allElements) {
+                    if (foundExpressIDs.has(elementID)) {
+                        continue; // Duplikat vermeiden
+                    }
+                    
+                    try {
+                        const line = ifcApi.GetLine(modelID, elementID);
+                        if (!line) {
+                            skippedReasons.noElementLine++;
+                            continue;
+                        }
+                        
+                        const typeCode = line.type;
+                        let typeName = '';
+                        
+                        try {
+                            typeName = ifcApi.GetNameFromTypeCode(typeCode);
+                        } catch (e) {
+                            skippedReasons.noTypeName++;
+                            continue;
+                        }
+                        
+                        // Filtere nur konkrete IFC-Elemente
+                        if (!typeName || !typeName.toUpperCase().startsWith('IFC')) {
+                            skippedReasons.notIFC++;
+                            continue;
+                        }
+                        
+                        // Filtere abstrakte Klassen und Type-Objekte
+                        const typeUpper = typeName.toUpperCase();
+                        const abstract = new Set([
+                            'IFCROOT', 'IFCOBJECT', 'IFCOBJECTDEFINITION',
+                            'IFCPRODUCT', 'IFCELEMENT', 'IFCSPATIALSTRUCTUREELEMENT',
+                            'IFCBUILDINGELEMENT', 'IFCDISTRIBUTIONELEMENT', 'IFCFLOWELEMENT'
+                        ]);
+                        
+                        if (abstract.has(typeUpper)) {
+                            skippedReasons.abstract++;
+                            continue;
+                        }
+                        
+                        if (typeUpper.includes('TYPEPRODUCT') || typeUpper.includes('TYPEOBJECT')) {
+                            skippedReasons.typeObject++;
+                            continue;
+                        }
+                        
+                        // Extrahiere Name und GlobalId
+                        const elementName = line.Name?.value || line.Name || `Element ${elementID}`;
+                        const elementGlobalId = line.GlobalId?.value || line.GlobalId || '';
+                        
+                        // Gruppiere nach IFC-Klasse
+                        if (!typesMap.has(typeName)) {
+                            typesMap.set(typeName, []);
+                        }
+                        
+                        typesMap.get(typeName).push({
+                            expressID: elementID,
+                            name: elementName,
+                            globalId: elementGlobalId,
+                            typeName: typeName
+                        });
+                        
+                        foundExpressIDs.add(elementID);
+                        
+                    } catch (e) {
+                        skippedReasons.error++;
+                        continue;
+                    }
+                }
+                
+                // Debug-Statistiken
+                console.log('📊 Typen-Extraktion Statistiken:');
+                console.log(`  - Gesamt Elemente: ${allElements.size}`);
+                console.log(`  - Gefundene Typen: ${typesMap.size}`);
+                console.log(`  - Übersprungen (keine ElementLine): ${skippedReasons.noElementLine}`);
+                console.log(`  - Übersprungen (kein TypName): ${skippedReasons.noTypeName}`);
+                console.log(`  - Übersprungen (nicht IFC): ${skippedReasons.notIFC}`);
+                console.log(`  - Übersprungen (abstrakt): ${skippedReasons.abstract}`);
+                console.log(`  - Übersprungen (Type-Objekt): ${skippedReasons.typeObject}`);
+                console.log(`  - Übersprungen (Fehler): ${skippedReasons.error}`);
+                
+                // Konvertiere Map zu Array und sortiere
+                const typesArray = Array.from(typesMap.entries())
+                    .map(([typeName, elements]) => ({
+                        typeName: typeName,
+                        count: elements.length,
+                        elements: elements.sort((a, b) => {
+                            // Sortiere nach Name, dann nach ExpressID
+                            const nameA = (a.name && typeof a.name === 'string') ? a.name : '';
+                            const nameB = (b.name && typeof b.name === 'string') ? b.name : '';
+                            
+                            if (nameA && nameB && 
+                                nameA !== `Element ${a.expressID}` && 
+                                nameB !== `Element ${b.expressID}`) {
+                                return nameA.localeCompare(nameB);
+                            }
+                            return a.expressID - b.expressID;
+                        })
+                    }))
+                    .sort((a, b) => {
+                        // Sortiere IFC-Klassen alphabetisch
+                        return a.typeName.localeCompare(b.typeName);
+                    });
+                
+                console.log('✓ Typen-Hierarchie extrahiert:', typesArray.length, 'verschiedene IFC-Klassen');
+                console.log('📋 Gefundene Klassen:', typesArray.map(t => `${t.typeName} (${t.count})`).join(', '));
+                return typesArray;
+                
+            } catch (error) {
+                console.error('❌ Fehler beim Extrahieren der Typen-Hierarchie:', error);
+                console.error('Stack:', error.stack);
+                return null;
+            }
+        }
+
+        // Typen-Tree erstellen (Standard IFC-Struktur)
+        function buildTypesTree(typesData) {
+            const container = document.getElementById('types-view');
+            container.innerHTML = '';
+            
+            if (!typesData || typesData.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; color: #7f8c8d;">Keine IFC-Klassen verfügbar</div>';
+                return;
+            }
+            
+            console.log('🌳 Erstelle Typen-Tree für:', typesData.length, 'IFC-Klassen');
+            
+            // Für jede IFC-Klasse
+            for (const typeGroup of typesData) {
+                const classNodeData = createTreeNode(
+                    {
+                        name: `${typeGroup.typeName} (${typeGroup.count})`,
+                        expressID: null,
+                        globalId: null
+                    },
+                    'type',
+                    () => {
+                        console.log('IFC-Klasse selektiert:', typeGroup.typeName);
+                    },
+                    typeGroup.elements.length > 0
+                );
+                
+                // Füge Elemente hinzu
+                for (const element of typeGroup.elements) {
+                    // Stelle sicher, dass der Name korrekt formatiert ist
+                    const elementName = (element.name && typeof element.name === 'string' && element.name.trim() !== '') 
+                        ? element.name 
+                        : `Element ${element.expressID}`;
+                    
+                    const elementNodeData = createTreeNode(
+                        {
+                            name: elementName,
+                            expressID: element.expressID,
+                            globalId: element.globalId
+                        },
+                        'element',
+                        () => {
+                            console.log('Element selektiert:', element);
+                            highlightElement(element.globalId);
+                        },
+                        false
+                    );
+                    classNodeData.children.appendChild(elementNodeData.node);
+                }
+                
+                container.appendChild(classNodeData.node);
+            }
+            
+            console.log('✅ Typen-Tree erstellt');
         }
 
         // Initialisiere beim Laden
