@@ -273,6 +273,9 @@
         <div id="controls">
             <label for="file-input" class="file-input-label">IFC-Datei auswählen</label>
             <input type="file" id="file-input" accept=".ifc" />
+            <label for="pdf-input" class="file-input-label">PDF auswählen</label>
+            <input type="file" id="pdf-input" accept=".pdf" />
+            <button id="toggle-pdf-btn" onclick="togglePDF()" disabled>PDF ausblenden</button>
             <button id="reset-btn" onclick="resetView()" disabled>Reset View</button>
             <button id="clear-btn" onclick="clearModel()" disabled>Modell löschen</button>
             <button id="projection-btn" onclick="toggleProjection()" disabled>Axonometrie</button>
@@ -300,6 +303,9 @@
 
     <!-- Load web-ifc from CDN (same as ifc-playground) -->
     <script src="https://unpkg.com/web-ifc@0.0.68/web-ifc-api-iife.js"></script>
+    
+    <!-- Load PDF.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     
     <!-- Import Map for Three.js modules -->
     <script type="importmap">
@@ -339,6 +345,11 @@
         
         // Hierarchie
         let hierarchyData = null;
+        
+        // PDF-Einblendung
+        let pdfPlane = null;
+        let pdfVisible = false;
+        let pdfScale = 10; // Standard-Skalierung für PDF-Plane
 
         // Initialisierung
         async function init() {
@@ -469,6 +480,14 @@
 
                 // File Input Handler
                 document.getElementById('file-input').addEventListener('change', handleFileLoad);
+                
+                // PDF Input Handler
+                document.getElementById('pdf-input').addEventListener('change', async (event) => {
+                    const file = event.target.files[0];
+                    if (file) {
+                        await loadPDFAsTexture(file);
+                    }
+                });
 
                 // Click-Handler für Selektion
                 renderer.domElement.addEventListener('dblclick', onMouseClick);
@@ -1077,6 +1096,17 @@
             // Storey-Filter zurücksetzen
             selectedStoreyIDs.clear();
             storeyElementMap.clear();
+            
+            // Entferne PDF-Plane
+            if (pdfPlane) {
+                scene.remove(pdfPlane);
+                pdfPlane.geometry.dispose();
+                pdfPlane.material.dispose();
+                pdfPlane = null;
+                pdfVisible = false;
+                document.getElementById('toggle-pdf-btn').disabled = true;
+                document.getElementById('pdf-input').value = '';
+            }
             
             document.getElementById('file-input').value = '';
             document.getElementById('reset-btn').disabled = true;
@@ -2176,9 +2206,134 @@
             console.log('✅ Typen-Tree erstellt');
         }
 
+        // PDF.js initialisieren
+        async function initPDFJS() {
+            if (typeof pdfjsLib !== 'undefined') {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                return true;
+            }
+            return false;
+        }
+
+        // PDF-Datei laden und als Textur rendern
+        async function loadPDFAsTexture(file) {
+            try {
+                updateStatus('Lade PDF...', 'loading');
+                
+                // Warte auf PDF.js
+                if (typeof pdfjsLib === 'undefined') {
+                    await new Promise((resolve) => {
+                        const checkInterval = setInterval(() => {
+                            if (typeof pdfjsLib !== 'undefined') {
+                                clearInterval(checkInterval);
+                                resolve();
+                            }
+                        }, 100);
+                    });
+                }
+                
+                await initPDFJS();
+                
+                const arrayBuffer = await file.arrayBuffer();
+                const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                const pdf = await loadingTask.promise;
+                
+                // Rendere erste Seite
+                const page = await pdf.getPage(1);
+                const viewport = page.getViewport({ scale: 2.0 });
+                
+                // Erstelle Canvas für PDF-Rendering
+                const canvas = document.createElement('canvas');
+                const context = canvas.getContext('2d');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                
+                // Rendere PDF-Seite auf Canvas
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
+                
+                // Erstelle Three.js Textur aus Canvas
+                const texture = new THREE.CanvasTexture(canvas);
+                texture.needsUpdate = true;
+                
+                // Entferne alte PDF-Plane falls vorhanden
+                if (pdfPlane) {
+                    scene.remove(pdfPlane);
+                    pdfPlane.geometry.dispose();
+                    pdfPlane.material.dispose();
+                }
+                
+                // Berechne Größe basierend auf Modell oder Standard
+                let planeWidth = pdfScale;
+                let planeHeight = pdfScale;
+                
+                if (currentModel) {
+                    const box = new THREE.Box3().setFromObject(currentModel);
+                    const size = box.getSize(new THREE.Vector3());
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    planeWidth = maxDim * 0.8;
+                    planeHeight = (viewport.height / viewport.width) * planeWidth;
+                } else {
+                    planeHeight = (viewport.height / viewport.width) * planeWidth;
+                }
+                
+                // Erstelle Plane-Geometrie
+                const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
+                
+                // Erstelle Material mit PDF-Textur
+                const material = new THREE.MeshBasicMaterial({
+                    map: texture,
+                    side: THREE.DoubleSide,
+                    transparent: true,
+                    opacity: 0.9
+                });
+                
+                // Erstelle Mesh
+                pdfPlane = new THREE.Mesh(geometry, material);
+                pdfPlane.name = 'PDF-Plane';
+                
+                // Positioniere Plane auf Z=0 (Grundriss-Ebene)
+                if (currentModel) {
+                    const box = new THREE.Box3().setFromObject(currentModel);
+                    const center = box.getCenter(new THREE.Vector3());
+                    pdfPlane.position.set(center.x, center.y, 0);
+                } else {
+                    pdfPlane.position.set(0, 0, 0);
+                }
+                
+                // Rotiere Plane, damit sie horizontal liegt (Grundriss-Ebene)
+                pdfPlane.rotation.x = -Math.PI / 2;
+                
+                // Füge Plane zur Scene hinzu
+                scene.add(pdfPlane);
+                pdfVisible = true;
+                
+                updateStatus(`PDF geladen: ${file.name}`, 'success');
+                document.getElementById('toggle-pdf-btn').disabled = false;
+                document.getElementById('toggle-pdf-btn').textContent = 'PDF ausblenden';
+                
+                console.log('✓ PDF als Textur geladen');
+            } catch (error) {
+                console.error('❌ Fehler beim Laden des PDFs:', error);
+                updateStatus(`Fehler beim Laden des PDFs: ${error.message}`, 'error');
+            }
+        }
+
+        // PDF ein-/ausblenden
+        function togglePDF() {
+            if (pdfPlane) {
+                pdfVisible = !pdfVisible;
+                pdfPlane.visible = pdfVisible;
+                document.getElementById('toggle-pdf-btn').textContent = pdfVisible ? 'PDF ausblenden' : 'PDF einblenden';
+            }
+        }
+
         // Funktionen für onclick-Attribute global verfügbar machen
         window.resetView = resetView;
         window.clearModel = clearModel;
+        window.togglePDF = togglePDF;
 
         // Initialisiere beim Laden
         init();
